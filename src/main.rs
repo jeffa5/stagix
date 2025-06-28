@@ -50,19 +50,14 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
     let mut container = build_html::Container::new(build_html::ContainerType::Div);
     container.add_header(2, "Log");
     let mut table = build_html::Table::new().with_header_row([
-        "Time", "ID", "Message", "Author", "Files", "Added", "Removed",
+        "Time", "ID", "Message", "Author", "Files", "Lines added", "Lines removed",
     ]);
     let head = repo.head()?;
     let revs = repo
         .rev_walk([head.id().unwrap()])
         .first_parent_only()
         .all()?;
-    let revs2 = repo
-        .rev_walk([head.id().unwrap()])
-        .first_parent_only()
-        .all()?
-        .skip(1);
-    for (rev1, rev2) in revs.zip(revs2) {
+    for rev1 in revs {
         let rev = rev1?;
         let id = rev.id().to_string();
         let commit = rev.object()?;
@@ -71,15 +66,20 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
         let name = author.name.to_string();
         let time = author.time()?.format(ISO8601);
         let tree = commit.tree()?;
-        let commit2 = rev2?.object()?;
-        let ancestor_tree = commit2.tree()?;
-        let mut changes = tree.changes()?;
-        let stats = changes.stats(&ancestor_tree)?;
-        let (changed, added, removed) = (
-            stats.files_changed.to_string(),
-            stats.lines_added.to_string(),
-            stats.lines_removed.to_string(),
-        );
+        let ancestors = commit.ancestors().first_parent_only().all()?;
+        let (changed, added, removed) = if let Some(ancestor) = ancestors.skip(1).next() {
+            let commit2 = ancestor?.object()?;
+            println!("{} {}", commit.id, commit2.id);
+            let ancestor_tree = commit2.tree()?;
+            let stats = ancestor_tree.changes()?.stats(&tree)?;
+            (
+                stats.files_changed.to_string(),
+                stats.lines_added.to_string(),
+                stats.lines_removed.to_string(),
+            )
+        } else {
+            (0.to_string(), 0.to_string(), 0.to_string())
+        };
         table.add_body_row([time, id, message, name, changed, added, removed]);
     }
     container.add_table(table);
