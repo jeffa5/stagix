@@ -1,4 +1,5 @@
-use build_html::{Container, Html, HtmlContainer, HtmlPage};
+use build_html::{Container, Html, HtmlContainer, HtmlPage, escape_html};
+use build_html::{HtmlElement, Table};
 use clap::Parser;
 use gix::Repository;
 use gix::bstr::ByteSlice as _;
@@ -50,7 +51,13 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
     let mut container = build_html::Container::new(build_html::ContainerType::Div);
     container.add_header(2, "Log");
     let mut table = build_html::Table::new().with_header_row([
-        "Time", "ID", "Message", "Author", "Files", "Lines added", "Lines removed",
+        "Time",
+        "ID",
+        "Message",
+        "Author",
+        "Files",
+        "Lines added",
+        "Lines removed",
     ]);
     let head = repo.head()?;
     let revs = repo
@@ -62,6 +69,9 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
         let id = rev.id().to_string();
         let commit = rev.object()?;
         let message = commit.message()?.title.trim().to_str()?.to_owned();
+        let message_html = HtmlElement::new(build_html::HtmlTag::Div)
+            .with_link_attr::<_, String>(format!("commits/{}", id), message, [])
+            .to_html_string();
         let author = commit.author()?;
         let name = author.name.to_string();
         let time = author.time()?.format(ISO8601);
@@ -79,10 +89,98 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
         } else {
             (0.to_string(), 0.to_string(), 0.to_string())
         };
-        table.add_body_row([time, id, message, name, changed, added, removed]);
+        table.add_body_row([time, id, message_html, name, changed, added, removed]);
     }
     container.add_table(table);
     Ok(container)
+}
+
+fn get_commits(repo: &Repository) -> anyhow::Result<Vec<(String, Container)>> {
+    let mut containers = Vec::new();
+    let head = repo.head()?;
+    let revs = repo
+        .rev_walk([head.id().unwrap()])
+        .first_parent_only()
+        .all()?;
+    for rev in revs {
+        let rev = rev?;
+        let mut container = build_html::Container::new(build_html::ContainerType::Div);
+        container.add_header(2, "Commit");
+
+        let mut table = Table::new();
+        table.add_body_row(["Revision", &rev.id.to_string()]);
+        let commit = rev.object()?;
+        let message = commit.message()?;
+
+        let author = commit.author()?;
+        table.add_body_row([
+            "Author",
+            &escape_html(&format!("{} <{}>", author.name, author.email)),
+        ]);
+        table.add_body_row(["Time", &author.time()?.format(ISO8601)]);
+        container.add_table(table);
+
+        container.add_paragraph(message.title);
+        container.add_paragraph(message.body.map_or(String::new(), |s| s.to_string()));
+
+        let tree = commit.tree()?;
+        let ancestors = commit.ancestors().first_parent_only().all()?;
+        if let Some(ancestor) = ancestors.skip(1).next() {
+            let commit2 = ancestor?.object()?;
+            let ancestor_tree = commit2.tree()?;
+            let stats = ancestor_tree.changes()?.stats(&tree)?;
+            let changed = stats.files_changed.to_string();
+            let added = stats.lines_added.to_string();
+            let removed = stats.lines_removed.to_string();
+            container.add_paragraph(format!(
+                "Files changed {}, Lines added {}, Lines removed {}",
+                changed, added, removed
+            ));
+
+            let mut resource_cache = repo.diff_resource_cache_for_tree_diff()?;
+            ancestor_tree.changes()?.for_each_to_obtain_tree(
+                &tree,
+                |change| -> Result<gix::object::tree::diff::Action, std::convert::Infallible> {
+                    if change.entry_mode().is_tree() {
+                        return Ok(gix::object::tree::diff::Action::Continue);
+                    }
+                    container.add_preformatted(format!("{}", change.location()));
+                    let mut diff = change.diff(&mut resource_cache).unwrap();
+                    diff.lines(|change_line| -> Result<(), std::convert::Infallible> {
+                        match change_line {
+                            gix::object::blob::diff::lines::Change::Addition { lines } => {
+                                let html_lines: Vec<String> =
+                                    lines.into_iter().map(|l| format!("+ {}", l)).collect();
+                                container.add_preformatted(html_lines.join("\n"));
+                            }
+                            gix::object::blob::diff::lines::Change::Deletion { lines } => {
+                                let html_lines: Vec<String> =
+                                    lines.into_iter().map(|l| format!("- {}", l)).collect();
+                                container.add_preformatted(html_lines.join("\n"));
+                            }
+                            gix::object::blob::diff::lines::Change::Modification {
+                                lines_before,
+                                lines_after,
+                            } => {
+                                let html_lines_before =
+                                    lines_before.into_iter().map(|l| format!("- {}", l));
+                                let html_lines_after =
+                                    lines_after.into_iter().map(|l| format!("+ {}", l));
+                                let html_lines: Vec<String> =
+                                    html_lines_before.chain(html_lines_after).collect();
+                                container.add_preformatted(html_lines.join("\n"));
+                            }
+                        }
+                        Ok(())
+                    })
+                    .unwrap();
+                    Ok(gix::object::tree::diff::Action::Continue)
+                },
+            )?;
+        };
+        containers.push((commit.id.to_string(), container));
+    }
+    Ok(containers)
 }
 
 fn write_html_content(path: &Path, container: Container) -> anyhow::Result<()> {
@@ -101,10 +199,14 @@ fn main() -> anyhow::Result<()> {
     let refs = get_refs(&repo)?;
     write_html_content(&args.out_dir.join("refs.html"), refs)?;
 
-    create_dir_all(args.out_dir.join("commits"))?;
-
     let log = get_log(&repo)?;
     write_html_content(&args.out_dir.join("log.html"), log)?;
+
+    let commits = get_commits(&repo)?;
+    for (id, commit) in commits {
+        create_dir_all(args.out_dir.join("commits"))?;
+        write_html_content(&args.out_dir.join("commits").join(id), commit)?;
+    }
 
     Ok(())
 }
