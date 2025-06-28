@@ -52,12 +52,12 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
     container.add_header(2, "Log");
     let mut table = build_html::Table::new().with_header_row([
         "Time",
-        "ID",
         "Message",
         "Author",
         "Files",
         "Lines added",
         "Lines removed",
+        "ID",
     ]);
     let head = repo.head()?;
     let revs = repo
@@ -89,7 +89,7 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
         } else {
             (0.to_string(), 0.to_string(), 0.to_string())
         };
-        table.add_body_row([time, id, message_html, name, changed, added, removed]);
+        table.add_body_row([time, message_html, name, changed, added, removed, id]);
     }
     container.add_table(table);
     Ok(container)
