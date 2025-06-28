@@ -1,0 +1,11 @@
+[package]
+name = "stagitrs"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.98"
+build_html = "2.6.0"
+clap = { version = "4.5.40", features = ["derive"] }
+gix = "0.72.1"
+gix-date = "0.10.2"
