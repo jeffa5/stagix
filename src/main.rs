@@ -184,8 +184,16 @@ fn get_commits(repo: &Repository) -> anyhow::Result<Vec<(String, Container)>> {
 }
 
 fn write_html_content(path: &Path, container: Container) -> anyhow::Result<()> {
+    let to_root = "../".repeat(path.components().count().saturating_sub(2));
     let page = HtmlPage::new()
         .with_title("Stagix")
+        .with_container(
+            Container::new(build_html::ContainerType::Nav)
+                .with_link(format!("{}log.html", to_root), "Log")
+                .with_raw(" | ")
+                .with_link(format!("{}refs.html", to_root), "Refs")
+                .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule)),
+        )
         .with_container(container);
     std::fs::write(path, page.to_html_string())?;
     Ok(())
