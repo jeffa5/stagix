@@ -69,7 +69,6 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
         let ancestors = commit.ancestors().first_parent_only().all()?;
         let (changed, added, removed) = if let Some(ancestor) = ancestors.skip(1).next() {
             let commit2 = ancestor?.object()?;
-            println!("{} {}", commit.id, commit2.id);
             let ancestor_tree = commit2.tree()?;
             let stats = ancestor_tree.changes()?.stats(&tree)?;
             (
