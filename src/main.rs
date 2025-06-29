@@ -2,9 +2,10 @@ use anyhow::Context as _;
 use build_html::{Container, Html, HtmlContainer, HtmlPage, escape_html};
 use build_html::{HtmlElement, Table};
 use clap::Parser;
-use gix::traverse::tree::Recorder;
 use gix::Repository;
 use gix::bstr::ByteSlice as _;
+use gix::objs::tree::EntryKind;
+use gix::traverse::tree::Recorder;
 use gix_date::time::format::ISO8601;
 use std::fs::create_dir_all;
 use std::path::Path;
@@ -191,14 +192,19 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
     head_tree.traverse().depthfirst(&mut recorder)?;
 
     let mut entries = Vec::new();
-    let mut paths = Vec::new();
+    let mut list_container = Container::new(build_html::ContainerType::Div);
+    let mut table = Table::new().with_header_row(["Mode", "Name", "Size"]);
     for entry in recorder.records {
-        if !entry.mode.is_blob() {
-            continue;
-        }
+        let mode = match entry.mode.kind() {
+            EntryKind::Tree => continue,
+            EntryKind::Blob => "-rw-r--r--",
+            EntryKind::BlobExecutable => "-rwxr-xr-x",
+            EntryKind::Link => continue,
+            EntryKind::Commit => continue,
+        };
         let obj = repo.find_object(entry.oid)?;
 
-        let path = PathBuf::from(entry.filepath.to_string());
+        let path = PathBuf::from(format!("{}.html", entry.filepath.to_string()));
         let file_data = str::from_utf8(&obj.data)?;
         let file_data_with_line_nums: Vec<String> = file_data
             .lines()
@@ -208,19 +214,14 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
         let content = Container::new(build_html::ContainerType::Div)
             .with_preformatted(escape_html(&file_data_with_line_nums.join("\n")));
         entries.push((path, content));
-        paths.push(entry.filepath.to_string());
-    }
 
-    let mut list_container = Container::new(build_html::ContainerType::Div);
-    let mut table = Table::new().with_header_row(["Type", "Path", "Size"]);
-    for path in paths {
-        let path = escape_html(&path);
+        let path = escape_html(&entry.filepath.to_string());
         table.add_body_row([
-            "file",
+            mode,
             &HtmlElement::new(build_html::HtmlTag::Span)
-                .with_link(format!("files/{}", path), path)
+                .with_link(format!("files/{}.html", path), path)
                 .to_html_string(),
-            "0",
+            &file_data.len().to_string(),
         ]);
     }
     list_container.add_table(table);
