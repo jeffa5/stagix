@@ -2,6 +2,7 @@ use anyhow::Context as _;
 use build_html::{Container, Html, HtmlContainer, HtmlPage, escape_html};
 use build_html::{HtmlElement, Table};
 use clap::Parser;
+use gix::traverse::tree::Recorder;
 use gix::Repository;
 use gix::bstr::ByteSlice as _;
 use gix_date::time::format::ISO8601;
@@ -186,17 +187,18 @@ fn get_commits(repo: &Repository) -> anyhow::Result<Vec<(String, Container)>> {
 
 fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Container)>)> {
     let head_tree = repo.head_tree()?;
-    let tree_iter = head_tree.iter();
+    let mut recorder = Recorder::default();
+    head_tree.traverse().depthfirst(&mut recorder)?;
+
     let mut entries = Vec::new();
     let mut paths = Vec::new();
-    for entry in tree_iter {
-        let entry = entry?;
-        if !entry.mode().is_blob() {
+    for entry in recorder.records {
+        if !entry.mode.is_blob() {
             continue;
         }
-        let obj = entry.object()?;
+        let obj = repo.find_object(entry.oid)?;
 
-        let path = PathBuf::from(entry.filename().to_string());
+        let path = PathBuf::from(entry.filepath.to_string());
         let file_data = str::from_utf8(&obj.data)?;
         let file_data_with_line_nums: Vec<String> = file_data
             .lines()
@@ -206,7 +208,7 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
         let content = Container::new(build_html::ContainerType::Div)
             .with_preformatted(escape_html(&file_data_with_line_nums.join("\n")));
         entries.push((path, content));
-        paths.push(entry.filename().to_string());
+        paths.push(entry.filepath.to_string());
     }
 
     let mut list_container = Container::new(build_html::ContainerType::Div);
