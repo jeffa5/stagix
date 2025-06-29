@@ -128,59 +128,65 @@ fn get_commits(repo: &Repository) -> anyhow::Result<Vec<(String, Container)>> {
 
         let tree = commit.tree()?;
         let ancestors = commit.ancestors().first_parent_only().all()?;
-        if let Some(ancestor) = ancestors.skip(1).next() {
+        let ancestor_tree = if let Some(ancestor) = ancestors.skip(1).next() {
             let commit2 = ancestor?.object()?;
             let ancestor_tree = commit2.tree()?;
-            let stats = ancestor_tree.changes()?.stats(&tree)?;
-            let changed = stats.files_changed.to_string();
-            let added = stats.lines_added.to_string();
-            let removed = stats.lines_removed.to_string();
-            container.add_paragraph(format!(
-                "Files changed {}, Lines added {}, Lines removed {}",
-                changed, added, removed
-            ));
-
-            let mut resource_cache = repo.diff_resource_cache_for_tree_diff()?;
-            ancestor_tree.changes()?.for_each_to_obtain_tree(
-                &tree,
-                |change| -> Result<gix::object::tree::diff::Action, std::convert::Infallible> {
-                    if change.entry_mode().is_tree() {
-                        return Ok(gix::object::tree::diff::Action::Continue);
-                    }
-                    container.add_preformatted(format!("{}", change.location()));
-                    let mut diff = change.diff(&mut resource_cache).unwrap();
-                    diff.lines(|change_line| -> Result<(), std::convert::Infallible> {
-                        match change_line {
-                            gix::object::blob::diff::lines::Change::Addition { lines } => {
-                                let html_lines: Vec<String> =
-                                    lines.into_iter().map(|l| format!("+ {}", l)).collect();
-                                container.add_preformatted(html_lines.join("\n"));
-                            }
-                            gix::object::blob::diff::lines::Change::Deletion { lines } => {
-                                let html_lines: Vec<String> =
-                                    lines.into_iter().map(|l| format!("- {}", l)).collect();
-                                container.add_preformatted(html_lines.join("\n"));
-                            }
-                            gix::object::blob::diff::lines::Change::Modification {
-                                lines_before,
-                                lines_after,
-                            } => {
-                                let html_lines_before =
-                                    lines_before.into_iter().map(|l| format!("- {}", l));
-                                let html_lines_after =
-                                    lines_after.into_iter().map(|l| format!("+ {}", l));
-                                let html_lines: Vec<String> =
-                                    html_lines_before.chain(html_lines_after).collect();
-                                container.add_preformatted(html_lines.join("\n"));
-                            }
-                        }
-                        Ok(())
-                    })
-                    .unwrap();
-                    Ok(gix::object::tree::diff::Action::Continue)
-                },
-            )?;
+            ancestor_tree
+        } else {
+            repo.empty_tree()
         };
+        let stats = ancestor_tree.changes()?.stats(&tree)?;
+        let changed = stats.files_changed.to_string();
+        let added = stats.lines_added.to_string();
+        let removed = stats.lines_removed.to_string();
+        container.add_paragraph(format!(
+            "Files changed {}, Lines added {}, Lines removed {}",
+            changed, added, removed
+        ));
+
+        let mut resource_cache = repo.diff_resource_cache_for_tree_diff()?;
+        ancestor_tree.changes()?.for_each_to_obtain_tree(
+            &tree,
+            |change| -> Result<gix::object::tree::diff::Action, std::convert::Infallible> {
+                if change.entry_mode().is_tree() {
+                    return Ok(gix::object::tree::diff::Action::Continue);
+                }
+                container.add_preformatted(format!("{}", change.location()));
+                let mut diff = change.diff(&mut resource_cache).unwrap();
+                diff.lines(|change_line| -> Result<(), std::convert::Infallible> {
+                    match change_line {
+                        gix::object::blob::diff::lines::Change::Addition { lines } => {
+                            container.add_raw("addition");
+                            let html_lines: Vec<String> =
+                                lines.into_iter().map(|l| format!("+ {}", l)).collect();
+                            container.add_preformatted(html_lines.join("\n"));
+                        }
+                        gix::object::blob::diff::lines::Change::Deletion { lines } => {
+                            container.add_raw("deletion");
+                            let html_lines: Vec<String> =
+                                lines.into_iter().map(|l| format!("- {}", l)).collect();
+                            container.add_preformatted(html_lines.join("\n"));
+                        }
+                        gix::object::blob::diff::lines::Change::Modification {
+                            lines_before,
+                            lines_after,
+                        } => {
+                            container.add_raw("modification");
+                            let html_lines_before =
+                                lines_before.into_iter().map(|l| format!("- {}", l));
+                            let html_lines_after =
+                                lines_after.into_iter().map(|l| format!("+ {}", l));
+                            let html_lines: Vec<String> =
+                                html_lines_before.chain(html_lines_after).collect();
+                            container.add_preformatted(html_lines.join("\n"));
+                        }
+                    }
+                    Ok(())
+                })
+                .unwrap();
+                Ok(gix::object::tree::diff::Action::Continue)
+            },
+        )?;
         containers.push((commit.id.to_string(), container));
     }
     Ok(containers)
