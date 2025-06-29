@@ -1,3 +1,4 @@
+use anyhow::Context as _;
 use build_html::{Container, Html, HtmlContainer, HtmlPage, escape_html};
 use build_html::{HtmlElement, Table};
 use clap::Parser;
@@ -183,6 +184,48 @@ fn get_commits(repo: &Repository) -> anyhow::Result<Vec<(String, Container)>> {
     Ok(containers)
 }
 
+fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Container)>)> {
+    let head_tree = repo.head_tree()?;
+    let tree_iter = head_tree.iter();
+    let mut entries = Vec::new();
+    let mut paths = Vec::new();
+    for entry in tree_iter {
+        let entry = entry?;
+        if !entry.mode().is_blob() {
+            continue;
+        }
+        let obj = entry.object()?;
+
+        let path = PathBuf::from(entry.filename().to_string());
+        let file_data = str::from_utf8(&obj.data)?;
+        let file_data_with_line_nums: Vec<String> = file_data
+            .lines()
+            .enumerate()
+            .map(|(i, line)| format!("{: >4} | {}", i, line))
+            .collect();
+        let content = Container::new(build_html::ContainerType::Div)
+            .with_preformatted(escape_html(&file_data_with_line_nums.join("\n")));
+        entries.push((path, content));
+        paths.push(entry.filename().to_string());
+    }
+
+    let mut list_container = Container::new(build_html::ContainerType::Div);
+    let mut table = Table::new().with_header_row(["Type", "Path", "Size"]);
+    for path in paths {
+        let path = escape_html(&path);
+        table.add_body_row([
+            "file",
+            &HtmlElement::new(build_html::HtmlTag::Span)
+                .with_link(format!("files/{}", path), path)
+                .to_html_string(),
+            "0",
+        ]);
+    }
+    list_container.add_table(table);
+
+    Ok((list_container, entries))
+}
+
 fn write_html_content(path: &Path, container: Container) -> anyhow::Result<()> {
     let to_root = "../".repeat(path.components().count().saturating_sub(2));
     let page = HtmlPage::new()
@@ -191,28 +234,38 @@ fn write_html_content(path: &Path, container: Container) -> anyhow::Result<()> {
             Container::new(build_html::ContainerType::Nav)
                 .with_link(format!("{}log.html", to_root), "Log")
                 .with_raw(" | ")
+                .with_link(format!("{}files.html", to_root), "Files")
+                .with_raw(" | ")
                 .with_link(format!("{}refs.html", to_root), "Refs")
                 .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule)),
         )
         .with_container(container);
-    std::fs::write(path, page.to_html_string())?;
+    std::fs::write(path, page.to_html_string()).context(path.to_string_lossy().into_owned())?;
     Ok(())
 }
 
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    let repo = gix::open(args.repo)?;
+    let repo = gix::open(args.repo).context("open repo")?;
 
-    let refs = get_refs(&repo)?;
+    let refs = get_refs(&repo).context("get refs")?;
     write_html_content(&args.out_dir.join("refs.html"), refs)?;
 
-    let log = get_log(&repo)?;
+    let (file_list, files) = get_files(&repo).context("get files")?;
+    create_dir_all(args.out_dir.join("files"))?;
+    for (path, content) in files {
+        create_dir_all(args.out_dir.join("files").join(path.parent().unwrap()))?;
+        write_html_content(&args.out_dir.join("files").join(path), content)?;
+    }
+    write_html_content(&args.out_dir.join("files.html"), file_list)?;
+
+    let log = get_log(&repo).context("get log")?;
     write_html_content(&args.out_dir.join("log.html"), log)?;
 
-    let commits = get_commits(&repo)?;
+    let commits = get_commits(&repo).context("get commits")?;
+    create_dir_all(args.out_dir.join("commits"))?;
     for (id, commit) in commits {
-        create_dir_all(args.out_dir.join("commits"))?;
         write_html_content(&args.out_dir.join("commits").join(id), commit)?;
     }
 
