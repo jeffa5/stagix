@@ -1,5 +1,5 @@
 use anyhow::Context as _;
-use build_html::{Container, Html, HtmlContainer, HtmlPage, escape_html};
+use build_html::{Container, Html, HtmlContainer, HtmlPage, TableCell, TableRow, escape_html};
 use build_html::{HtmlElement, Table};
 use clap::Parser;
 use gix::Repository;
@@ -23,7 +23,9 @@ struct Args {
 fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
     let refs = repo.references()?;
     let mut container = build_html::Container::new(build_html::ContainerType::Div);
-    let mut table = build_html::Table::new().with_attributes([( "id", "tags" )]).with_header_row(["Name", "Time", "Author"]);
+    let mut table = build_html::Table::new()
+        .with_attributes([("id", "tags")])
+        .with_header_row(["Name", "Last commit time", "Author"]);
     let mut has_tags = false;
     for tag in refs.tags()? {
         let mut tag = tag.unwrap();
@@ -41,7 +43,9 @@ fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
     }
 
     container.add_header(2, "Branches");
-    let mut table = build_html::Table::new().with_attributes([("id", "branches")]).with_header_row(["Name", "Time", "Author"]);
+    let mut table = build_html::Table::new()
+        .with_attributes([("id", "branches")])
+        .with_header_row(["Name", "Last commit time", "Author"]);
     for branch in refs.local_branches()? {
         let mut branch = branch.unwrap();
         let commit = branch.peel_to_commit()?;
@@ -57,15 +61,9 @@ fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
 
 fn get_log(repo: &Repository) -> anyhow::Result<Container> {
     let mut container = build_html::Container::new(build_html::ContainerType::Div);
-    let mut table = build_html::Table::new().with_attributes([("id", "log")]).with_header_row([
-        "Time",
-        "Commit message",
-        "Author",
-        "Files",
-        "+",
-        "-",
-        "ID",
-    ]);
+    let mut table = build_html::Table::new()
+        .with_attributes([("id", "log")])
+        .with_header_row(["Time", "Commit message", "Author", "Files", "+", "-", "ID"]);
     let head = repo.head()?;
     let revs = repo
         .rev_walk([head.id().unwrap()])
@@ -96,7 +94,28 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
         } else {
             (0.to_string(), 0.to_string(), 0.to_string())
         };
-        table.add_body_row([time, message_html, name, changed, added, removed, id]);
+        table.add_custom_body_row(
+            TableRow::new()
+                .with_cell(TableCell::default().with_raw(time))
+                .with_cell(TableCell::default().with_raw(message_html))
+                .with_cell(TableCell::default().with_raw(name))
+                .with_cell(
+                    TableCell::default()
+                        .with_attributes([("class", "num")])
+                        .with_raw(changed),
+                )
+                .with_cell(
+                    TableCell::default()
+                        .with_attributes([("class", "num")])
+                        .with_raw(added),
+                )
+                .with_cell(
+                    TableCell::default()
+                        .with_attributes([("class", "num")])
+                        .with_raw(removed),
+                )
+                .with_cell(TableCell::default().with_raw(id)),
+        );
     }
     container.add_table(table);
     Ok(container)
@@ -124,7 +143,7 @@ fn get_commits(repo: &Repository) -> anyhow::Result<Vec<(String, Container)>> {
             "Author",
             &escape_html(&format!("{} <{}>", author.name, author.email)),
         ]);
-        table.add_body_row(["Time", &author.time()?.format(ISO8601)]);
+        table.add_body_row(["Last commit time", &author.time()?.format(ISO8601)]);
         container.add_table(table);
 
         container.add_paragraph(message.title);
@@ -203,7 +222,9 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
 
     let mut entries = Vec::new();
     let mut list_container = Container::new(build_html::ContainerType::Div);
-    let mut table = Table::new().with_attributes([("id", "files")]).with_header_row(["Mode", "Name", "Size"]);
+    let mut table = Table::new()
+        .with_attributes([("id", "files")])
+        .with_header_row(["Mode", "Name", "Size"]);
     for entry in recorder.records {
         let mode = match entry.mode.kind() {
             EntryKind::Tree => continue,
@@ -226,13 +247,22 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
         entries.push((path, content));
 
         let path = escape_html(&entry.filepath.to_string());
-        table.add_body_row([
-            mode,
-            &HtmlElement::new(build_html::HtmlTag::Span)
-                .with_link(format!("files/{}.html", path), path)
-                .to_html_string(),
-            &format!("{}L", file_data.lines().count()),
-        ]);
+        table.add_custom_body_row(
+            TableRow::new()
+                .with_cell(TableCell::default().with_raw(mode))
+                .with_cell(
+                    TableCell::default().with_html(
+                        HtmlElement::new(build_html::HtmlTag::Span)
+                            .with_link(format!("files/{}.html", path), path)
+                            .to_html_string(),
+                    ),
+                )
+                .with_cell(
+                    TableCell::default()
+                        .with_attributes([("class", "num")])
+                        .with_raw(format!("{}L", file_data.lines().count())),
+                ),
+        );
     }
     list_container.add_table(table);
 
