@@ -1,29 +1,214 @@
 use anyhow::Context as _;
-use build_html::{Container, Html, HtmlContainer, HtmlPage, TableCell, TableRow, escape_html};
-use build_html::{HtmlElement, Table};
-use clap::Parser;
+use build_html::{
+    Container, Html as _, HtmlContainer as _, HtmlElement, HtmlPage, Table, TableCell, TableRow,
+    escape_html,
+};
 use gix::Repository;
 use gix::bstr::ByteSlice as _;
 use gix::objs::tree::EntryKind;
 use gix::traverse::tree::{Recorder, Visit};
 use gix_date::time::format::ISO8601;
-use std::env::current_dir;
 use std::fs::{create_dir_all, read_to_string};
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 const README_FILES: [&str; 2] = ["README", "README.md"];
 const LICENSE_FILES: [&str; 3] = ["LICENSE", "LICENSE.md", "COPYING"];
 
-#[derive(Debug, Parser)]
-struct Args {
-    #[clap()]
-    repo: PathBuf,
-    #[clap(default_value = "out")]
-    out_dir: PathBuf,
-    /// Number of commits to limit log history to, uses all commits if not set.
-    #[clap(short, long)]
+#[derive(Default)]
+struct MetaDelegate {
+    readme: Option<String>,
+    license: Option<String>,
+}
+
+impl Visit for MetaDelegate {
+    fn pop_back_tracked_path_and_set_current(&mut self) {}
+
+    fn pop_front_tracked_path_and_set_current(&mut self) {}
+
+    fn push_back_tracked_path_component(&mut self, _component: &gix::bstr::BStr) {}
+
+    fn push_path_component(&mut self, _component: &gix::bstr::BStr) {}
+
+    fn pop_path_component(&mut self) {}
+
+    fn visit_tree(
+        &mut self,
+        _entry: &gix::objs::tree::EntryRef<'_>,
+    ) -> gix::traverse::tree::visit::Action {
+        gix::traverse::tree::visit::Action::Skip
+    }
+
+    fn visit_nontree(
+        &mut self,
+        entry: &gix::objs::tree::EntryRef<'_>,
+    ) -> gix::traverse::tree::visit::Action {
+        let filename = entry.filename.to_string();
+        if README_FILES.contains(&filename.as_str()) {
+            self.readme = Some(filename);
+        } else if LICENSE_FILES.contains(&filename.as_str()) {
+            self.license = Some(filename);
+        }
+        gix::traverse::tree::visit::Action::Continue
+    }
+}
+
+#[derive(Debug)]
+pub struct Meta {
+    pub description: String,
+    pub url: String,
+    pub name: String,
+    pub owner: String,
+    pub readme: Option<String>,
+    pub license: Option<String>,
+}
+
+impl Meta {
+    pub fn load(repo: &Repository, path: &Path) -> anyhow::Result<Self> {
+        let description = Self::load_meta_file(repo, "description").unwrap_or_default();
+        if description.is_empty() {
+            eprintln!("no description file found");
+        }
+        let url = Self::load_meta_file(repo, "url").unwrap_or_default();
+        if url.is_empty() {
+            eprintln!("no url file found");
+        }
+        let owner = Self::load_meta_file(repo, "owner").unwrap_or_default();
+        if owner.is_empty() {
+            eprintln!("no owner file found");
+        }
+        let name = path
+            .canonicalize()?
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+
+        let head_tree = repo.head_tree()?;
+        let mut delegate = MetaDelegate::default();
+        head_tree.traverse().breadthfirst(&mut delegate)?;
+
+        Ok(Meta {
+            description,
+            url,
+            name,
+            owner,
+            readme: delegate.readme,
+            license: delegate.license,
+        })
+    }
+
+    fn load_meta_file(repo: &Repository, name: &str) -> anyhow::Result<String> {
+        let path = if repo.is_bare() {
+            name.to_string()
+        } else {
+            format!(".git/{}", name)
+        };
+        let path = PathBuf::from(path);
+        let content = read_to_string(path)?;
+        Ok(content)
+    }
+
+    pub fn write_html_content(
+        &self,
+        title: &str,
+        path: &Path,
+        container: Container,
+        nav: bool,
+    ) -> anyhow::Result<()> {
+        let to_root = "../".repeat(path.components().count().saturating_sub(2));
+        let mut head_table = Table::new();
+        head_table.add_body_row([
+            &HtmlElement::new(build_html::HtmlTag::Div)
+                .with_link(
+                    &to_root,
+                    HtmlElement::new(build_html::HtmlTag::Div)
+                        .with_image_attr(format!("{}logo.png", to_root), "logo", [("id", "logo")])
+                        .to_html_string(),
+                )
+                .to_html_string(),
+            &Container::new(build_html::ContainerType::Div)
+                .with_header(1, &self.name)
+                .with_html(
+                    HtmlElement::new(build_html::HtmlTag::Span)
+                        .with_attribute("class", "desc")
+                        .with_raw(&self.description),
+                )
+                .to_html_string(),
+        ]);
+        if !self.url.is_empty() {
+            head_table.add_body_row(["", &format!("git clone {}", self.url)]);
+        }
+        if nav {
+            let mut nav = Container::new(build_html::ContainerType::Nav)
+                .with_link(format!("{}log.html", to_root), "Log")
+                .with_raw(" | ")
+                .with_link(format!("{}files.html", to_root), "Files")
+                .with_raw(" | ")
+                .with_link(format!("{}refs.html", to_root), "Refs");
+            if let Some(readme) = &self.readme {
+                nav.add_raw(" | ");
+                nav.add_link(format!("{}files/{}.html", to_root, readme), "README");
+            }
+            if let Some(license) = &self.license {
+                nav.add_raw(" | ");
+                nav.add_link(format!("{}files/{}.html", to_root, license), "LICENSE");
+            }
+            head_table.add_body_row(["", &nav.to_html_string()]);
+        }
+
+        let page = HtmlPage::new()
+            .with_title(format!("{} - {}", title, self.name))
+            .with_stylesheet(format!("{}style.css", to_root))
+            .with_head_link(format!("{}favicon.png", to_root), "icon")
+            .with_table(head_table)
+            .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule))
+            .with_container(container);
+
+        std::fs::write(path, page.to_html_string()).context(path.to_string_lossy().into_owned())?;
+        Ok(())
+    }
+}
+
+pub fn build_index_page(
+    repos: Vec<PathBuf>,
+    out_dir: &Path,
+    do_build_repo_pages: bool,
     log_length: Option<usize>,
+) -> anyhow::Result<()> {
+    let index_meta = Meta {
+        description: String::new(),
+        url: String::new(),
+        name: "Repositories".to_owned(),
+        owner: String::new(),
+        readme: None,
+        license: None,
+    };
+
+    let mut table = Table::new()
+        .with_attributes([("id", "index")])
+        .with_header_row(["Name", "Description", "Owner", "Last commit"]);
+    for repo_path in repos {
+        let repo = gix::open(&repo_path)?;
+        let head = repo.head_commit()?;
+        let time = head.time()?.format(ISO8601);
+        let meta = Meta::load(&repo, &repo_path)?;
+        let name = HtmlElement::new(build_html::HtmlTag::Link)
+            .with_attribute("href", format!("{}/log.html", meta.name))
+            .with_raw(&meta.name)
+            .to_html_string();
+        table.add_body_row([name, meta.description, meta.owner, time]);
+
+        if do_build_repo_pages {
+            eprintln!("Building repo {:?} to {}", repo_path, meta.name);
+            let repo_out_dir = out_dir.join(meta.name);
+            create_dir_all(&repo_out_dir)?;
+            build_repo_pages(&repo_path, &repo_out_dir, log_length)?;
+        }
+    }
+    let container = Container::new(build_html::ContainerType::Div).with_table(table);
+
+    index_meta.write_html_content("Index", &out_dir.join("index.html"), container, false)?;
+    Ok(())
 }
 
 fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
@@ -315,175 +500,42 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
     Ok((list_container, entries))
 }
 
-#[derive(Default)]
-struct MetaDelegate {
-    readme: Option<String>,
-    license: Option<String>,
-}
+pub fn build_repo_pages(
+    repo_path: &Path,
+    out_dir: &Path,
+    log_length: Option<usize>,
+) -> anyhow::Result<()> {
+    let repo = gix::open(&repo_path).context("open repo")?;
 
-impl Visit for MetaDelegate {
-    fn pop_back_tracked_path_and_set_current(&mut self) {}
-
-    fn pop_front_tracked_path_and_set_current(&mut self) {}
-
-    fn push_back_tracked_path_component(&mut self, _component: &gix::bstr::BStr) {}
-
-    fn push_path_component(&mut self, _component: &gix::bstr::BStr) {}
-
-    fn pop_path_component(&mut self) {}
-
-    fn visit_tree(
-        &mut self,
-        _entry: &gix::objs::tree::EntryRef<'_>,
-    ) -> gix::traverse::tree::visit::Action {
-        gix::traverse::tree::visit::Action::Skip
-    }
-
-    fn visit_nontree(
-        &mut self,
-        entry: &gix::objs::tree::EntryRef<'_>,
-    ) -> gix::traverse::tree::visit::Action {
-        let filename = entry.filename.to_string();
-        if README_FILES.contains(&filename.as_str()) {
-            self.readme = Some(filename);
-        } else if LICENSE_FILES.contains(&filename.as_str()) {
-            self.license = Some(filename);
-        }
-        gix::traverse::tree::visit::Action::Continue
-    }
-}
-
-struct Meta {
-    description: String,
-    url: String,
-    name: String,
-    readme: Option<String>,
-    license: Option<String>,
-}
-
-impl Meta {
-    fn load(repo: &Repository) -> anyhow::Result<Self> {
-        let description = Self::load_meta_file(repo, "description").unwrap_or_default();
-        if description.is_empty() {
-            eprintln!("no description file found");
-        }
-        let url = Self::load_meta_file(repo, "url").unwrap_or_default();
-        if url.is_empty() {
-            eprintln!("no url file found");
-        }
-        let name = current_dir()?;
-        let name = name.file_name().unwrap().to_string_lossy().into_owned();
-
-        let head_tree = repo.head_tree()?;
-        let mut delegate = MetaDelegate::default();
-        head_tree.traverse().breadthfirst(&mut delegate)?;
-
-        Ok(Meta {
-            description,
-            url,
-            name,
-            readme: delegate.readme,
-            license: delegate.license,
-        })
-    }
-
-    fn load_meta_file(repo: &Repository, name: &str) -> anyhow::Result<String> {
-        let path = if repo.is_bare() {
-            name.to_string()
-        } else {
-            format!(".git/{}", name)
-        };
-        let path = PathBuf::from(path);
-        let content = read_to_string(path)?;
-        Ok(content)
-    }
-
-    fn write_html_content(
-        &self,
-        title: &str,
-        path: &Path,
-        container: Container,
-    ) -> anyhow::Result<()> {
-        let to_root = "../".repeat(path.components().count().saturating_sub(2));
-        let mut head_table = Table::new();
-        head_table.add_body_row([
-            &HtmlElement::new(build_html::HtmlTag::Div)
-                .with_link(
-                    &to_root,
-                    HtmlElement::new(build_html::HtmlTag::Div)
-                        .with_image_attr(format!("{}logo.png", to_root), "logo", [("id", "logo")])
-                        .to_html_string(),
-                )
-                .to_html_string(),
-            &Container::new(build_html::ContainerType::Div)
-                .with_header(1, &self.name)
-                .with_html(
-                    HtmlElement::new(build_html::HtmlTag::Span)
-                        .with_attribute("class", "desc")
-                        .with_raw(&self.description),
-                )
-                .to_html_string(),
-        ]);
-        head_table.add_body_row(["", &format!("git clone {}", self.url)]);
-        let mut nav = Container::new(build_html::ContainerType::Nav)
-            .with_link(format!("{}log.html", to_root), "Log")
-            .with_raw(" | ")
-            .with_link(format!("{}files.html", to_root), "Files")
-            .with_raw(" | ")
-            .with_link(format!("{}refs.html", to_root), "Refs");
-        if let Some(readme) = &self.readme {
-            nav.add_raw(" | ");
-            nav.add_link(format!("{}files/{}.html", to_root, readme), "README");
-        }
-        if let Some(license) = &self.license {
-            nav.add_raw(" | ");
-            nav.add_link(format!("{}files/{}.html", to_root, license), "LICENSE");
-        }
-        head_table.add_body_row(["", &nav.to_html_string()]);
-
-        let page = HtmlPage::new()
-            .with_title(format!("{} - {}", title, self.name))
-            .with_stylesheet(format!("{}style.css", to_root))
-            .with_head_link(format!("{}favicon.png", to_root), "icon")
-            .with_table(head_table)
-            .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule))
-            .with_container(container);
-
-        std::fs::write(path, page.to_html_string()).context(path.to_string_lossy().into_owned())?;
-        Ok(())
-    }
-}
-
-fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
-
-    let repo = gix::open(args.repo).context("open repo")?;
-
-    let meta = Meta::load(&repo)?;
+    let meta = Meta::load(&repo, repo_path)?;
 
     let refs = get_refs(&repo).context("get refs")?;
-    meta.write_html_content("Refs", &args.out_dir.join("refs.html"), refs)?;
+    meta.write_html_content("Refs", &out_dir.join("refs.html"), refs, true)?;
 
     let (file_list, files) = get_files(&repo).context("get files")?;
-    create_dir_all(args.out_dir.join("files"))?;
+    create_dir_all(out_dir.join("files"))?;
     for (path, content) in files {
-        create_dir_all(args.out_dir.join("files").join(path.parent().unwrap()))?;
+        create_dir_all(out_dir.join("files").join(path.parent().unwrap()))?;
         meta.write_html_content(
-            path.with_extension("").file_name().unwrap().to_str().unwrap(),
-            &args.out_dir.join("files").join(&path),
+            path.with_extension("")
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            &out_dir.join("files").join(&path),
             content,
+            true,
         )?;
     }
-    meta.write_html_content("Files", &args.out_dir.join("files.html"), file_list)?;
+    meta.write_html_content("Files", &out_dir.join("files.html"), file_list, true)?;
 
-    let log = get_log(&repo, args.log_length).context("get log")?;
-    meta.write_html_content("Log", &args.out_dir.join("log.html"), log)?;
+    let log = get_log(&repo, log_length).context("get log")?;
+    meta.write_html_content("Log", &out_dir.join("log.html"), log, true)?;
 
-    let commits = get_commits(&repo, args.log_length).context("get commits")?;
-    create_dir_all(args.out_dir.join("commits"))?;
+    let commits = get_commits(&repo, log_length).context("get commits")?;
+    create_dir_all(out_dir.join("commits"))?;
     for (id, commit) in commits {
-        meta.write_html_content(&id, &args.out_dir.join("commits").join(&id), commit)?;
+        meta.write_html_content(&id, &out_dir.join("commits").join(&id), commit, true)?;
     }
-
     Ok(())
 }

@@ -9,3 +9,12 @@ build_html = "2.6.0"
 clap = { version = "4.5.40", features = ["derive"] }
 gix = "0.72.1"
 gix-date = "0.10.2"
+
+[[bin]]
+name = "stagix-repo"
+
+[[bin]]
+name = "stagix-index"
+
+[[bin]]
+name = "stagix"
