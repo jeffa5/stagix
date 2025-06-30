@@ -239,28 +239,37 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
         let obj = repo.find_object(entry.oid)?;
 
         let path = PathBuf::from(format!("{}.html", entry.filepath.to_string()));
-        let file_data = str::from_utf8(&obj.data)?;
-        let (line_nums, lines): (Vec<String>, Vec<String>) = file_data
-            .lines()
-            .enumerate()
-            .map(|(i, line)| {
-                (
-                    HtmlElement::new(build_html::HtmlTag::Span)
-                        .with_link_attr(
-                            format!("#l{}", i),
-                            format!("{: >7} ", i),
-                            [("id", i.to_string().as_str()), ("class", "line")],
-                        )
-                        .to_html_string(),
-                    escape_html(line),
-                )
-            })
-            .unzip();
-        let content = Container::new(build_html::ContainerType::Div)
-            .with_paragraph(format!("{} ({}B)", path.to_string_lossy(), file_data.len()))
-            .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule))
-            .with_preformatted_attr(&line_nums.join("\n"), [("id", "linenos")])
-            .with_preformatted_attr(&lines.join("\n"), [("id", "blob")]);
+        let mut content = Container::new(build_html::ContainerType::Div)
+            .with_paragraph(format!("{} ({}B)", entry.filepath.to_string(), obj.data.len()))
+            .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule));
+
+        let size = if let Ok(file_content) = str::from_utf8(&obj.data) {
+            let (line_nums, lines): (Vec<String>, Vec<String>) = file_content
+                .lines()
+                .enumerate()
+                .map(|(i, line)| {
+                    (
+                        HtmlElement::new(build_html::HtmlTag::Span)
+                            .with_link_attr(
+                                format!("#l{}", i),
+                                format!("{: >7} ", i),
+                                [("id", i.to_string().as_str()), ("class", "line")],
+                            )
+                            .to_html_string(),
+                        escape_html(line),
+                    )
+                })
+                .unzip();
+
+            content.add_preformatted_attr(&line_nums.join("\n"), [("id", "linenos")]);
+            content.add_preformatted_attr(&lines.join("\n"), [("id", "blob")]);
+
+            format!("{}L", file_content.lines().count())
+        } else {
+            content.add_raw("binary content");
+            format!("{}B", obj.data.len())
+        };
+
         entries.push((path, content));
 
         let path = escape_html(&entry.filepath.to_string());
@@ -277,7 +286,7 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
                 .with_cell(
                     TableCell::default()
                         .with_attributes([("class", "num")])
-                        .with_raw(format!("{}L", file_data.lines().count())),
+                        .with_raw(size),
                 ),
         );
     }
