@@ -21,6 +21,9 @@ struct Args {
     repo: PathBuf,
     #[clap(default_value = "out")]
     out_dir: PathBuf,
+    /// Number of commits to limit log history to, uses all commits if not set.
+    #[clap(short, long)]
+    log_length: Option<usize>,
 }
 
 fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
@@ -62,7 +65,7 @@ fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
     Ok(container)
 }
 
-fn get_log(repo: &Repository) -> anyhow::Result<Container> {
+fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Container> {
     let mut container = build_html::Container::new(build_html::ContainerType::Div);
     let mut table = build_html::Table::new()
         .with_attributes([("id", "log")])
@@ -72,8 +75,13 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
         .rev_walk([head.id().unwrap()])
         .first_parent_only()
         .all()?;
-    for rev1 in revs {
-        let rev = rev1?;
+    for (i, rev) in revs.enumerate() {
+        if let Some(log_len) = log_length {
+            if i >= log_len {
+                break;
+            }
+        }
+        let rev = rev?;
         let id = rev.id().to_string();
         let commit = rev.object()?;
         let message = commit.message()?.title.trim().to_str()?.to_owned();
@@ -124,14 +132,19 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
     Ok(container)
 }
 
-fn get_commits(repo: &Repository) -> anyhow::Result<Vec<(String, Container)>> {
+fn get_commits(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Vec<(String, Container)>> {
     let mut containers = Vec::new();
     let head = repo.head()?;
     let revs = repo
         .rev_walk([head.id().unwrap()])
         .first_parent_only()
         .all()?;
-    for rev in revs {
+    for (i, rev) in revs.enumerate() {
+        if let Some(log_len) = log_length {
+            if i >= log_len {
+                break;
+            }
+        }
         let rev = rev?;
         let mut container = build_html::Container::new(build_html::ContainerType::Div);
         container.add_header(2, "Commit");
@@ -451,10 +464,10 @@ fn main() -> anyhow::Result<()> {
     }
     meta.write_html_content(&args.out_dir.join("files.html"), file_list)?;
 
-    let log = get_log(&repo).context("get log")?;
+    let log = get_log(&repo, args.log_length).context("get log")?;
     meta.write_html_content(&args.out_dir.join("log.html"), log)?;
 
-    let commits = get_commits(&repo).context("get commits")?;
+    let commits = get_commits(&repo, args.log_length).context("get commits")?;
     create_dir_all(args.out_dir.join("commits"))?;
     for (id, commit) in commits {
         meta.write_html_content(&args.out_dir.join("commits").join(id), commit)?;
