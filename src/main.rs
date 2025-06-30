@@ -85,18 +85,18 @@ fn get_log(repo: &Repository) -> anyhow::Result<Container> {
         let time = author.time()?.format(ISO8601);
         let tree = commit.tree()?;
         let ancestors = commit.ancestors().first_parent_only().all()?;
-        let (changed, added, removed) = if let Some(ancestor) = ancestors.skip(1).next() {
+        let ancestor_tree = if let Some(ancestor) = ancestors.skip(1).next() {
             let commit2 = ancestor?.object()?;
             let ancestor_tree = commit2.tree()?;
-            let stats = ancestor_tree.changes()?.stats(&tree)?;
-            (
-                stats.files_changed.to_string(),
-                stats.lines_added.to_string(),
-                stats.lines_removed.to_string(),
-            )
+            ancestor_tree
         } else {
-            (0.to_string(), 0.to_string(), 0.to_string())
+            repo.empty_tree()
         };
+        let stats = ancestor_tree.changes()?.stats(&tree)?;
+        let changed = stats.files_changed.to_string();
+        let added = format!("+{}", stats.lines_added);
+        let removed = format!("-{}", stats.lines_removed);
+
         table.add_custom_body_row(
             TableRow::new()
                 .with_cell(TableCell::default().with_raw(time))
