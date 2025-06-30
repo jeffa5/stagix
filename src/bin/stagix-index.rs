@@ -13,7 +13,7 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
-    stagix::build_index_page(args.repos, &args.out_dir, false, None)?;
+    stagix::build_index_page(args.repos, &args.out_dir, false, None, None, None, None)?;
 
     Ok(())
 }

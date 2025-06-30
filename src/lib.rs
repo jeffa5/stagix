@@ -8,7 +8,7 @@ use gix::bstr::ByteSlice as _;
 use gix::objs::tree::EntryKind;
 use gix::traverse::tree::{Recorder, Visit};
 use gix_date::time::format::ISO8601;
-use std::fs::{create_dir_all, read_to_string};
+use std::fs::{self, create_dir_all, read_to_string};
 use std::path::{Path, PathBuf};
 
 const README_FILES: [&str; 2] = ["README", "README.md"];
@@ -174,6 +174,9 @@ pub fn build_index_page(
     out_dir: &Path,
     do_build_repo_pages: bool,
     log_length: Option<usize>,
+    style_path: Option<PathBuf>,
+    logo_path: Option<PathBuf>,
+    favicon_path: Option<PathBuf>,
 ) -> anyhow::Result<()> {
     let index_meta = Meta {
         description: String::new(),
@@ -208,6 +211,17 @@ pub fn build_index_page(
     let container = Container::new(build_html::ContainerType::Div).with_table(table);
 
     index_meta.write_html_content("Index", &out_dir.join("index.html"), container, false)?;
+
+    if let Some(path) = style_path {
+        fs::copy(path, out_dir.join("style.css"))?;
+    }
+    if let Some(path) = logo_path {
+        fs::copy(path, out_dir.join("logo.png"))?;
+    }
+    if let Some(path) = favicon_path {
+        fs::copy(path, out_dir.join("favicon.png"))?;
+    }
+
     Ok(())
 }
 
