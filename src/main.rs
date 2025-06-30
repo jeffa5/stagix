@@ -7,7 +7,8 @@ use gix::bstr::ByteSlice as _;
 use gix::objs::tree::EntryKind;
 use gix::traverse::tree::Recorder;
 use gix_date::time::format::ISO8601;
-use std::fs::create_dir_all;
+use std::env::current_dir;
+use std::fs::{create_dir_all, read_to_string};
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -22,8 +23,8 @@ struct Args {
 fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
     let refs = repo.references()?;
     let mut container = build_html::Container::new(build_html::ContainerType::Div);
-    container.add_header(2, "Tags");
-    let mut table = build_html::Table::new().with_header_row(["Name", "Time", "Author"]);
+    let mut table = build_html::Table::new().with_attributes([( "id", "tags" )]).with_header_row(["Name", "Time", "Author"]);
+    let mut has_tags = false;
     for tag in refs.tags()? {
         let mut tag = tag.unwrap();
         let commit = tag.peel_to_commit()?;
@@ -32,11 +33,15 @@ fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
         let name = author.name.to_str()?;
         let time = author.time()?.format(ISO8601);
         table.add_body_row([tag_name, &time, name]);
+        has_tags = true;
     }
-    container.add_table(table);
+    if has_tags {
+        container.add_header(2, "Tags");
+        container.add_table(table);
+    }
 
     container.add_header(2, "Branches");
-    let mut table = build_html::Table::new().with_header_row(["Name", "Time", "Author"]);
+    let mut table = build_html::Table::new().with_attributes([("id", "branches")]).with_header_row(["Name", "Time", "Author"]);
     for branch in refs.local_branches()? {
         let mut branch = branch.unwrap();
         let commit = branch.peel_to_commit()?;
@@ -52,14 +57,13 @@ fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
 
 fn get_log(repo: &Repository) -> anyhow::Result<Container> {
     let mut container = build_html::Container::new(build_html::ContainerType::Div);
-    container.add_header(2, "Log");
-    let mut table = build_html::Table::new().with_header_row([
+    let mut table = build_html::Table::new().with_attributes([("id", "log")]).with_header_row([
         "Time",
-        "Message",
+        "Commit message",
         "Author",
         "Files",
-        "Lines added",
-        "Lines removed",
+        "+",
+        "-",
         "ID",
     ]);
     let head = repo.head()?;
@@ -199,7 +203,7 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
 
     let mut entries = Vec::new();
     let mut list_container = Container::new(build_html::ContainerType::Div);
-    let mut table = Table::new().with_header_row(["Mode", "Name", "Size"]);
+    let mut table = Table::new().with_attributes([("id", "files")]).with_header_row(["Mode", "Name", "Size"]);
     for entry in recorder.records {
         let mode = match entry.mode.kind() {
             EntryKind::Tree => continue,
@@ -227,7 +231,7 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
             &HtmlElement::new(build_html::HtmlTag::Span)
                 .with_link(format!("files/{}.html", path), path)
                 .to_html_string(),
-            &file_data.len().to_string(),
+            &format!("{}L", file_data.lines().count()),
         ]);
     }
     list_container.add_table(table);
@@ -235,22 +239,76 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
     Ok((list_container, entries))
 }
 
-fn write_html_content(path: &Path, container: Container) -> anyhow::Result<()> {
-    let to_root = "../".repeat(path.components().count().saturating_sub(2));
-    let page = HtmlPage::new()
-        .with_title("Stagix")
-        .with_container(
-            Container::new(build_html::ContainerType::Nav)
-                .with_link(format!("{}log.html", to_root), "Log")
-                .with_raw(" | ")
-                .with_link(format!("{}files.html", to_root), "Files")
-                .with_raw(" | ")
-                .with_link(format!("{}refs.html", to_root), "Refs")
-                .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule)),
-        )
-        .with_container(container);
-    std::fs::write(path, page.to_html_string()).context(path.to_string_lossy().into_owned())?;
-    Ok(())
+struct Meta {
+    description: String,
+    url: String,
+    name: String,
+}
+
+impl Meta {
+    fn load(repo: &Repository) -> anyhow::Result<Self> {
+        let description = Self::load_meta_file(repo, "description").unwrap_or_default();
+        if description.is_empty() {
+            eprintln!("no description file found");
+        }
+        let url = Self::load_meta_file(repo, "url").unwrap_or_default();
+        if url.is_empty() {
+            eprintln!("no url file found");
+        }
+        let name = current_dir()?;
+        let name = name.file_name().unwrap().to_string_lossy().into_owned();
+
+        Ok(Meta {
+            description,
+            url,
+            name,
+        })
+    }
+
+    fn load_meta_file(repo: &Repository, name: &str) -> anyhow::Result<String> {
+        let path = if repo.is_bare() {
+            name.to_string()
+        } else {
+            format!(".git/{}", name)
+        };
+        let path = PathBuf::from(path);
+        let content = read_to_string(path)?;
+        Ok(content)
+    }
+
+    fn write_html_content(&self, path: &Path, container: Container) -> anyhow::Result<()> {
+        let to_root = "../".repeat(path.components().count().saturating_sub(2));
+        let mut head_table = Table::new();
+        head_table.add_body_row([
+            "",
+            &Container::new(build_html::ContainerType::Div)
+                .with_header(1, &self.name)
+                .with_html(
+                    HtmlElement::new(build_html::HtmlTag::Span)
+                        .with_attribute("class", "desc")
+                        .with_raw(&self.description),
+                )
+                .to_html_string(),
+        ]);
+        head_table.add_body_row(["", &format!("git clone {}", self.url)]);
+        let nav = Container::new(build_html::ContainerType::Nav)
+            .with_link(format!("{}log.html", to_root), "Log")
+            .with_raw(" | ")
+            .with_link(format!("{}files.html", to_root), "Files")
+            .with_raw(" | ")
+            .with_link(format!("{}refs.html", to_root), "Refs");
+        head_table.add_body_row(["", &nav.to_html_string()]);
+
+        let page = HtmlPage::new()
+            .with_title(format!("Stagix | {}", self.name))
+            .with_stylesheet(format!("{}style.css", to_root))
+            .with_table(head_table)
+            .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule))
+            .with_container(container);
+
+        std::fs::write(path, page.to_html_string()).context(path.to_string_lossy().into_owned())?;
+        Ok(())
+    }
 }
 
 fn main() -> anyhow::Result<()> {
@@ -258,24 +316,26 @@ fn main() -> anyhow::Result<()> {
 
     let repo = gix::open(args.repo).context("open repo")?;
 
+    let meta = Meta::load(&repo)?;
+
     let refs = get_refs(&repo).context("get refs")?;
-    write_html_content(&args.out_dir.join("refs.html"), refs)?;
+    meta.write_html_content(&args.out_dir.join("refs.html"), refs)?;
 
     let (file_list, files) = get_files(&repo).context("get files")?;
     create_dir_all(args.out_dir.join("files"))?;
     for (path, content) in files {
         create_dir_all(args.out_dir.join("files").join(path.parent().unwrap()))?;
-        write_html_content(&args.out_dir.join("files").join(path), content)?;
+        meta.write_html_content(&args.out_dir.join("files").join(path), content)?;
     }
-    write_html_content(&args.out_dir.join("files.html"), file_list)?;
+    meta.write_html_content(&args.out_dir.join("files.html"), file_list)?;
 
     let log = get_log(&repo).context("get log")?;
-    write_html_content(&args.out_dir.join("log.html"), log)?;
+    meta.write_html_content(&args.out_dir.join("log.html"), log)?;
 
     let commits = get_commits(&repo).context("get commits")?;
     create_dir_all(args.out_dir.join("commits"))?;
     for (id, commit) in commits {
-        write_html_content(&args.out_dir.join("commits").join(id), commit)?;
+        meta.write_html_content(&args.out_dir.join("commits").join(id), commit)?;
     }
 
     Ok(())
