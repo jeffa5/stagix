@@ -28,11 +28,18 @@ a.line {
 	text-decoration: none;
 }
 
-#blob a {
+#linenos {
+	display: inline-block;
+}
+#blob {
+	display: inline-block;
+}
+
+#linenos a {
 	color: #555;
 }
 
-#blob a:hover {
+#linenos a:hover {
 	color: blue;
 	text-decoration: none;
 }
@@ -125,7 +132,7 @@ pre a.d:hover {
 	#blob a {
 		color: #555;
 	}
-	#blob a:target {
+	#linenos a:target {
 		color: #eee;
 	}
 	#blob a:hover {
