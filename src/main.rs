@@ -132,7 +132,10 @@ fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Conta
     Ok(container)
 }
 
-fn get_commits(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Vec<(String, Container)>> {
+fn get_commits(
+    repo: &Repository,
+    log_length: Option<usize>,
+) -> anyhow::Result<Vec<(String, Container)>> {
     let mut containers = Vec::new();
     let head = repo.head()?;
     let revs = repo
@@ -395,7 +398,12 @@ impl Meta {
         Ok(content)
     }
 
-    fn write_html_content(&self, path: &Path, container: Container) -> anyhow::Result<()> {
+    fn write_html_content(
+        &self,
+        title: &str,
+        path: &Path,
+        container: Container,
+    ) -> anyhow::Result<()> {
         let to_root = "../".repeat(path.components().count().saturating_sub(2));
         let mut head_table = Table::new();
         head_table.add_body_row([
@@ -434,7 +442,7 @@ impl Meta {
         head_table.add_body_row(["", &nav.to_html_string()]);
 
         let page = HtmlPage::new()
-            .with_title(format!("Stagix | {}", self.name))
+            .with_title(format!("{} - {}", title, self.name))
             .with_stylesheet(format!("{}style.css", to_root))
             .with_head_link(format!("{}favicon.png", to_root), "icon")
             .with_table(head_table)
@@ -454,23 +462,27 @@ fn main() -> anyhow::Result<()> {
     let meta = Meta::load(&repo)?;
 
     let refs = get_refs(&repo).context("get refs")?;
-    meta.write_html_content(&args.out_dir.join("refs.html"), refs)?;
+    meta.write_html_content("Refs", &args.out_dir.join("refs.html"), refs)?;
 
     let (file_list, files) = get_files(&repo).context("get files")?;
     create_dir_all(args.out_dir.join("files"))?;
     for (path, content) in files {
         create_dir_all(args.out_dir.join("files").join(path.parent().unwrap()))?;
-        meta.write_html_content(&args.out_dir.join("files").join(path), content)?;
+        meta.write_html_content(
+            path.with_extension("").file_name().unwrap().to_str().unwrap(),
+            &args.out_dir.join("files").join(&path),
+            content,
+        )?;
     }
-    meta.write_html_content(&args.out_dir.join("files.html"), file_list)?;
+    meta.write_html_content("Files", &args.out_dir.join("files.html"), file_list)?;
 
     let log = get_log(&repo, args.log_length).context("get log")?;
-    meta.write_html_content(&args.out_dir.join("log.html"), log)?;
+    meta.write_html_content("Log", &args.out_dir.join("log.html"), log)?;
 
     let commits = get_commits(&repo, args.log_length).context("get commits")?;
     create_dir_all(args.out_dir.join("commits"))?;
     for (id, commit) in commits {
-        meta.write_html_content(&args.out_dir.join("commits").join(id), commit)?;
+        meta.write_html_content(&id, &args.out_dir.join("commits").join(&id), commit)?;
     }
 
     Ok(())
