@@ -373,7 +373,14 @@ impl Meta {
         let to_root = "../".repeat(path.components().count().saturating_sub(2));
         let mut head_table = Table::new();
         head_table.add_body_row([
-            "",
+            &HtmlElement::new(build_html::HtmlTag::Div)
+                .with_link(
+                    &to_root,
+                    HtmlElement::new(build_html::HtmlTag::Div)
+                        .with_image_attr(format!("{}logo.png", to_root), "logo", [("id", "logo")])
+                        .to_html_string(),
+                )
+                .to_html_string(),
             &Container::new(build_html::ContainerType::Div)
                 .with_header(1, &self.name)
                 .with_html(
@@ -403,6 +410,7 @@ impl Meta {
         let page = HtmlPage::new()
             .with_title(format!("Stagix | {}", self.name))
             .with_stylesheet(format!("{}style.css", to_root))
+            .with_head_link(format!("{}favicon.png", to_root), "icon")
             .with_table(head_table)
             .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule))
             .with_container(container);
