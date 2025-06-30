@@ -5,12 +5,15 @@ use clap::Parser;
 use gix::Repository;
 use gix::bstr::ByteSlice as _;
 use gix::objs::tree::EntryKind;
-use gix::traverse::tree::Recorder;
+use gix::traverse::tree::{Recorder, Visit};
 use gix_date::time::format::ISO8601;
 use std::env::current_dir;
 use std::fs::{create_dir_all, read_to_string};
 use std::path::Path;
 use std::path::PathBuf;
+
+const README_FILES: [&str; 2] = ["README", "README.md"];
+const LICENSE_FILES: [&str; 3] = ["LICENSE", "LICENSE.md", "COPYING"];
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -269,10 +272,50 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
     Ok((list_container, entries))
 }
 
+#[derive(Default)]
+struct MetaDelegate {
+    readme: Option<String>,
+    license: Option<String>,
+}
+
+impl Visit for MetaDelegate {
+    fn pop_back_tracked_path_and_set_current(&mut self) {}
+
+    fn pop_front_tracked_path_and_set_current(&mut self) {}
+
+    fn push_back_tracked_path_component(&mut self, _component: &gix::bstr::BStr) {}
+
+    fn push_path_component(&mut self, _component: &gix::bstr::BStr) {}
+
+    fn pop_path_component(&mut self) {}
+
+    fn visit_tree(
+        &mut self,
+        _entry: &gix::objs::tree::EntryRef<'_>,
+    ) -> gix::traverse::tree::visit::Action {
+        gix::traverse::tree::visit::Action::Skip
+    }
+
+    fn visit_nontree(
+        &mut self,
+        entry: &gix::objs::tree::EntryRef<'_>,
+    ) -> gix::traverse::tree::visit::Action {
+        let filename = entry.filename.to_string();
+        if README_FILES.contains(&filename.as_str()) {
+            self.readme = Some(filename);
+        } else if LICENSE_FILES.contains(&filename.as_str()) {
+            self.license = Some(filename);
+        }
+        gix::traverse::tree::visit::Action::Continue
+    }
+}
+
 struct Meta {
     description: String,
     url: String,
     name: String,
+    readme: Option<String>,
+    license: Option<String>,
 }
 
 impl Meta {
@@ -288,10 +331,16 @@ impl Meta {
         let name = current_dir()?;
         let name = name.file_name().unwrap().to_string_lossy().into_owned();
 
+        let head_tree = repo.head_tree()?;
+        let mut delegate = MetaDelegate::default();
+        head_tree.traverse().breadthfirst(&mut delegate)?;
+
         Ok(Meta {
             description,
             url,
             name,
+            readme: delegate.readme,
+            license: delegate.license,
         })
     }
 
@@ -321,12 +370,20 @@ impl Meta {
                 .to_html_string(),
         ]);
         head_table.add_body_row(["", &format!("git clone {}", self.url)]);
-        let nav = Container::new(build_html::ContainerType::Nav)
+        let mut nav = Container::new(build_html::ContainerType::Nav)
             .with_link(format!("{}log.html", to_root), "Log")
             .with_raw(" | ")
             .with_link(format!("{}files.html", to_root), "Files")
             .with_raw(" | ")
             .with_link(format!("{}refs.html", to_root), "Refs");
+        if let Some(readme) = &self.readme {
+            nav.add_raw(" | ");
+            nav.add_link(format!("{}files/{}.html", to_root, readme), "README");
+        }
+        if let Some(license) = &self.license {
+            nav.add_raw(" | ");
+            nav.add_link(format!("{}files/{}.html", to_root, license), "LICENSE");
+        }
         head_table.add_body_row(["", &nav.to_html_string()]);
 
         let page = HtmlPage::new()
