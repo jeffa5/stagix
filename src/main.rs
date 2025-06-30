@@ -243,10 +243,22 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
         let file_data_with_line_nums: Vec<String> = file_data
             .lines()
             .enumerate()
-            .map(|(i, line)| format!("{: >4} | {}", i, line))
+            .map(|(i, line)| {
+                HtmlElement::new(build_html::HtmlTag::Span)
+                    .with_link_attr(
+                        format!("#l{}", i),
+                        format!("{: >7}", i),
+                        [("id", i.to_string().as_str()), ("class", "line")],
+                    )
+                    .with_raw(" ")
+                    .with_child(escape_html(line).into())
+                    .to_html_string()
+            })
             .collect();
         let content = Container::new(build_html::ContainerType::Div)
-            .with_preformatted(escape_html(&file_data_with_line_nums.join("\n")));
+            .with_paragraph(format!("{} ({}B)", path.to_string_lossy(), file_data.len()))
+            .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule))
+            .with_preformatted_attr(&file_data_with_line_nums.join("\n"), [("id", "blob")]);
         entries.push((path, content));
 
         let path = escape_html(&entry.filepath.to_string());
