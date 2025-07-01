@@ -476,7 +476,7 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
 
             format!("{}L", file_content.lines().count())
         } else {
-            content.add_raw("binary content");
+            content.add_raw("binary file.");
             format!("{}B", obj.data.len())
         };
 
