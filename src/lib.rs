@@ -11,6 +11,8 @@ use gix_date::time::format::ISO8601;
 use std::fs::{File, create_dir_all, read_to_string};
 use std::path::{Path, PathBuf};
 
+mod html;
+
 const README_FILES: [&str; 2] = ["README", "README.md"];
 const LICENSE_FILES: [&str; 3] = ["LICENSE", "LICENSE.md", "COPYING"];
 
@@ -116,7 +118,14 @@ impl Meta {
         let mut file = File::create(&path)?;
         let to_repo_root = to_root_path(&path, out_dir);
         let to_index_root = format!("../{}", to_repo_root);
-        self.write_html_content(title, &to_index_root, &to_repo_root, container, nav, &mut file)
+        self.write_html_content(
+            title,
+            &to_index_root,
+            &to_repo_root,
+            container,
+            nav,
+            &mut file,
+        )
     }
 
     pub fn write_html_content(
@@ -276,7 +285,7 @@ fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Conta
         let commit = rev.object()?;
         let message = commit.message()?.title.trim().to_str()?.to_owned();
         let message_html = HtmlElement::new(build_html::HtmlTag::Div)
-            .with_link_attr::<_, String>(format!("commits/{}", id), message, [])
+            .with_link_attr::<_, String>(format!("commits/{}.html", id), message, [])
             .to_html_string();
         let author = commit.author()?;
         let name = author.name.to_string();
@@ -339,22 +348,41 @@ fn get_commits(
             }
         }
         let rev = rev?;
-        let mut container = build_html::Container::new(build_html::ContainerType::Div);
-        container.add_header(2, "Commit");
+        let mut container = build_html::Container::new(build_html::ContainerType::Div)
+            .with_attributes([("id", "content")]);
+        let mut pre = HtmlElement::new(build_html::HtmlTag::Div);
 
-        let mut table = Table::new();
-        table.add_body_row(["Revision", &rev.id.to_string()]);
+        pre.add_html(html::Bold::from("commit "));
+        pre.add_link(
+            format!("../commits/{}.html", rev.id),
+            format!("{}\n", rev.id),
+        );
+
         let commit = rev.object()?;
-        let message = commit.message()?;
+        let parent_revs = commit.parent_ids().map(|p| p.to_string());
+
+        pre.add_html(html::Bold::from("parents "));
+        for (j, parent_rev) in parent_revs.enumerate() {
+            if j == 0 && Some(i + 1) != log_length {
+                pre.add_link(format!("../commits/{}.html", parent_rev), parent_rev);
+            } else {
+                pre.add_child(parent_rev.into());
+            }
+        }
+        pre.add_child("\n".into());
 
         let author = commit.author()?;
-        table.add_body_row([
-            "Author",
-            &escape_html(&format!("{} <{}>", author.name, author.email)),
-        ]);
-        table.add_body_row(["Last commit time", &author.time()?.format(ISO8601)]);
-        container.add_table(table);
 
+        pre.add_html(html::Bold::from("author "));
+        pre.add_child(format!("{} <{}>\n", author.name, author.email).into());
+
+        pre.add_html(html::Bold::from("child "));
+        pre.add_child(author.time()?.format(ISO8601).into());
+        pre.add_child("\n".into());
+
+        let message = commit.message()?;
+
+        container.add_preformatted(pre);
         container.add_paragraph(message.title);
         container.add_paragraph(message.body.map_or(String::new(), |s| s.to_string()));
 
@@ -550,7 +578,7 @@ pub fn build_repo_pages(
     for (id, commit) in commits {
         meta.write_html_content_to_file(
             &id,
-            &PathBuf::from("commits").join(&id),
+            &PathBuf::from("commits").join(&id).with_extension("html"),
             commit,
             true,
             &out_dir,
