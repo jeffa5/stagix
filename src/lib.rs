@@ -376,7 +376,7 @@ fn get_commits(
         pre.add_html(html::Bold::from("author "));
         pre.add_child(format!("{} <{}>\n", author.name, author.email).into());
 
-        pre.add_html(html::Bold::from("child "));
+        pre.add_html(html::Bold::from("date "));
         pre.add_child(author.time()?.format(ISO8601).into());
         pre.add_child("\n".into());
 
