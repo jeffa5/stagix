@@ -8,6 +8,7 @@ use gix::bstr::ByteSlice as _;
 use gix::objs::tree::EntryKind;
 use gix::traverse::tree::{Recorder, Visit};
 use gix_date::time::format::ISO8601;
+use html::Bold;
 use std::fs::{File, create_dir_all, read_to_string};
 use std::path::{Path, PathBuf};
 
@@ -352,7 +353,7 @@ fn get_commits(
             .with_attributes([("id", "content")]);
         let mut pre = HtmlElement::new(build_html::HtmlTag::Div);
 
-        pre.add_html(html::Bold::from("commit "));
+        pre.add_html(Bold::from("commit "));
         pre.add_link(
             format!("../commits/{}.html", rev.id),
             format!("{}\n", rev.id),
@@ -361,7 +362,7 @@ fn get_commits(
         let commit = rev.object()?;
         let parent_revs = commit.parent_ids().map(|p| p.to_string());
 
-        pre.add_html(html::Bold::from("parents "));
+        pre.add_html(Bold::from("parents "));
         for (j, parent_rev) in parent_revs.enumerate() {
             if j == 0 && Some(i + 1) != log_length {
                 pre.add_link(format!("../commits/{}.html", parent_rev), parent_rev);
@@ -373,10 +374,10 @@ fn get_commits(
 
         let author = commit.author()?;
 
-        pre.add_html(html::Bold::from("author "));
+        pre.add_html(Bold::from("author "));
         pre.add_child(escape_html(&format!("{} <{}>\n", author.name, author.email)).into());
 
-        pre.add_html(html::Bold::from("date "));
+        pre.add_html(Bold::from("date "));
         pre.add_child(author.time()?.format(ISO8601).into());
         pre.add_child("\n".into());
 
@@ -406,6 +407,7 @@ fn get_commits(
             changed, added, removed
         ));
 
+        container.add_html(Bold::from("Diffstat:"));
         let mut diffstat_table = Table::new();
 
         let mut resource_cache = repo.diff_resource_cache_for_tree_diff()?;
