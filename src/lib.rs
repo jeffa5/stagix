@@ -98,11 +98,7 @@ impl Meta {
     }
 
     fn load_meta_file(repo: &Repository, name: &str) -> anyhow::Result<String> {
-        let path = if repo.is_bare() {
-            name.to_string()
-        } else {
-            format!(".git/{}", name)
-        };
+        let path = repo.path().join(name);
         let path = PathBuf::from(path);
         let content = read_to_string(path)?;
         Ok(content)
