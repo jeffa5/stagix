@@ -8,7 +8,7 @@ use gix::bstr::ByteSlice as _;
 use gix::objs::tree::EntryKind;
 use gix::traverse::tree::{Recorder, Visit};
 use gix_date::time::format::ISO8601;
-use std::fs::{self, create_dir_all, read_to_string};
+use std::fs::{File, create_dir_all, read_to_string};
 use std::path::{Path, PathBuf};
 
 const README_FILES: [&str; 2] = ["README", "README.md"];
@@ -104,21 +104,41 @@ impl Meta {
         Ok(content)
     }
 
+    pub fn write_html_content_to_file(
+        &self,
+        title: &str,
+        filepath: &Path,
+        container: Container,
+        nav: bool,
+        out_dir: &Path,
+    ) -> anyhow::Result<()> {
+        let path = out_dir.join(filepath);
+        let mut file = File::create(&path)?;
+        let to_repo_root = to_root_path(&path, out_dir);
+        let to_index_root = format!("../{}", to_repo_root);
+        self.write_html_content(title, &to_index_root, &to_repo_root, container, nav, &mut file)
+    }
+
     pub fn write_html_content(
         &self,
         title: &str,
-        path: &Path,
+        to_index_root: &str,
+        to_repo_root: &str,
         container: Container,
         nav: bool,
+        out: &mut impl std::io::Write,
     ) -> anyhow::Result<()> {
-        let to_root = "../".repeat(path.components().count().saturating_sub(2));
         let mut head_table = Table::new();
         head_table.add_body_row([
             &HtmlElement::new(build_html::HtmlTag::Div)
                 .with_link(
-                    &to_root,
+                    &format!("{}index.html", to_index_root),
                     HtmlElement::new(build_html::HtmlTag::Div)
-                        .with_image_attr(format!("{}logo.png", to_root), "logo", [("id", "logo")])
+                        .with_image_attr(
+                            format!("{}logo.png", to_index_root),
+                            "logo",
+                            [("id", "logo")],
+                        )
                         .to_html_string(),
                 )
                 .to_html_string(),
@@ -136,44 +156,36 @@ impl Meta {
         }
         if nav {
             let mut nav = Container::new(build_html::ContainerType::Nav)
-                .with_link(format!("{}log.html", to_root), "Log")
+                .with_link(format!("{}log.html", to_repo_root), "Log")
                 .with_raw(" | ")
-                .with_link(format!("{}files.html", to_root), "Files")
+                .with_link(format!("{}files.html", to_repo_root), "Files")
                 .with_raw(" | ")
-                .with_link(format!("{}refs.html", to_root), "Refs");
+                .with_link(format!("{}refs.html", to_repo_root), "Refs");
             if let Some(readme) = &self.readme {
                 nav.add_raw(" | ");
-                nav.add_link(format!("{}files/{}.html", to_root, readme), "README");
+                nav.add_link(format!("{}files/{}.html", to_repo_root, readme), "README");
             }
             if let Some(license) = &self.license {
                 nav.add_raw(" | ");
-                nav.add_link(format!("{}files/{}.html", to_root, license), "LICENSE");
+                nav.add_link(format!("{}files/{}.html", to_repo_root, license), "LICENSE");
             }
             head_table.add_body_row(["", &nav.to_html_string()]);
         }
 
         let page = HtmlPage::new()
             .with_title(format!("{} - {}", title, self.name))
-            .with_stylesheet(format!("{}style.css", to_root))
-            .with_head_link(format!("{}favicon.png", to_root), "icon")
+            .with_stylesheet(format!("{}style.css", to_index_root))
+            .with_head_link(format!("{}favicon.png", to_index_root), "icon")
             .with_table(head_table)
             .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule))
             .with_container(container);
 
-        std::fs::write(path, page.to_html_string()).context(path.to_string_lossy().into_owned())?;
+        out.write_all(page.to_html_string().as_bytes())?;
         Ok(())
     }
 }
 
-pub fn build_index_page(
-    repos: Vec<PathBuf>,
-    out_dir: &Path,
-    do_build_repo_pages: bool,
-    log_length: Option<usize>,
-    style_path: Option<PathBuf>,
-    logo_path: Option<PathBuf>,
-    favicon_path: Option<PathBuf>,
-) -> anyhow::Result<()> {
+pub fn build_index_page(repos: Vec<PathBuf>) -> anyhow::Result<()> {
     let index_meta = Meta {
         description: String::new(),
         url: String::new(),
@@ -196,27 +208,10 @@ pub fn build_index_page(
             .with_raw(&meta.name)
             .to_html_string();
         table.add_body_row([name, meta.description, meta.owner, time]);
-
-        if do_build_repo_pages {
-            eprintln!("Building repo {:?} to {}", repo_path, meta.name);
-            let repo_out_dir = out_dir.join(meta.name);
-            create_dir_all(&repo_out_dir)?;
-            build_repo_pages(&repo_path, &repo_out_dir, log_length)?;
-        }
     }
     let container = Container::new(build_html::ContainerType::Div).with_table(table);
 
-    index_meta.write_html_content("Index", &out_dir.join("index.html"), container, false)?;
-
-    if let Some(path) = style_path {
-        fs::copy(path, out_dir.join("style.css"))?;
-    }
-    if let Some(path) = logo_path {
-        fs::copy(path, out_dir.join("logo.png"))?;
-    }
-    if let Some(path) = favicon_path {
-        fs::copy(path, out_dir.join("favicon.png"))?;
-    }
+    index_meta.write_html_content("Index", "", "", container, false, &mut std::io::stdout())?;
 
     Ok(())
 }
@@ -520,32 +515,51 @@ pub fn build_repo_pages(
     let meta = Meta::load(&repo, repo_path)?;
 
     let refs = get_refs(&repo).context("get refs")?;
-    meta.write_html_content("Refs", &out_dir.join("refs.html"), refs, true)?;
+    meta.write_html_content_to_file("Refs", &PathBuf::from("refs.html"), refs, true, &out_dir)?;
 
     let (file_list, files) = get_files(&repo).context("get files")?;
     create_dir_all(out_dir.join("files"))?;
     for (path, content) in files {
         create_dir_all(out_dir.join("files").join(path.parent().unwrap()))?;
-        meta.write_html_content(
+        meta.write_html_content_to_file(
             path.with_extension("")
                 .file_name()
                 .unwrap()
                 .to_str()
                 .unwrap(),
-            &out_dir.join("files").join(&path),
+            &PathBuf::from("files").join(&path),
             content,
             true,
+            &out_dir,
         )?;
     }
-    meta.write_html_content("Files", &out_dir.join("files.html"), file_list, true)?;
+    meta.write_html_content_to_file(
+        "Files",
+        &PathBuf::from("files.html"),
+        file_list,
+        true,
+        &out_dir,
+    )?;
 
     let log = get_log(&repo, log_length).context("get log")?;
-    meta.write_html_content("Log", &out_dir.join("log.html"), log, true)?;
+    meta.write_html_content_to_file("Log", &PathBuf::from("log.html"), log, true, &out_dir)?;
 
     let commits = get_commits(&repo, log_length).context("get commits")?;
     create_dir_all(out_dir.join("commits"))?;
     for (id, commit) in commits {
-        meta.write_html_content(&id, &out_dir.join("commits").join(&id), commit, true)?;
+        meta.write_html_content_to_file(
+            &id,
+            &PathBuf::from("commits").join(&id),
+            commit,
+            true,
+            &out_dir,
+        )?;
     }
     Ok(())
+}
+
+fn to_root_path(from: &Path, to: &Path) -> String {
+    eprintln!("{:?} {:?}", from, to);
+    let path = from.strip_prefix(to).unwrap();
+    "../".repeat(path.components().count().saturating_sub(2))
 }
