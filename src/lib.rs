@@ -510,6 +510,7 @@ pub fn build_repo_pages(
     out_dir: &Path,
     log_length: Option<usize>,
 ) -> anyhow::Result<()> {
+    let out_dir = out_dir.canonicalize()?;
     let repo = gix::open(&repo_path).context("open repo")?;
 
     let meta = Meta::load(&repo, repo_path)?;
@@ -559,7 +560,6 @@ pub fn build_repo_pages(
 }
 
 fn to_root_path(from: &Path, to: &Path) -> String {
-    eprintln!("{:?} {:?}", from, to);
     let path = from.strip_prefix(to).unwrap();
-    "../".repeat(path.components().count().saturating_sub(2))
+    "../".repeat(path.components().count().saturating_sub(1))
 }
