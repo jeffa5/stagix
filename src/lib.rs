@@ -466,13 +466,11 @@ fn get_commits(
                 diff.lines(|change_line| -> Result<(), std::convert::Infallible> {
                     match change_line {
                         gix::object::blob::diff::lines::Change::Addition { lines } => {
-                            container.add_raw("addition");
                             let html_lines: Vec<String> =
                                 lines.into_iter().map(|l| format!("+ {}", l)).collect();
                             container.add_preformatted(html_lines.join("\n"));
                         }
                         gix::object::blob::diff::lines::Change::Deletion { lines } => {
-                            container.add_raw("deletion");
                             let html_lines: Vec<String> =
                                 lines.into_iter().map(|l| format!("- {}", l)).collect();
                             container.add_preformatted(html_lines.join("\n"));
@@ -481,7 +479,6 @@ fn get_commits(
                             lines_before,
                             lines_after,
                         } => {
-                            container.add_raw("modification");
                             let html_lines_before =
                                 lines_before.into_iter().map(|l| format!("- {}", l));
                             let html_lines_after =
