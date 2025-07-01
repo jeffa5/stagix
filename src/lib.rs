@@ -404,6 +404,8 @@ fn get_commits(
             changed, added, removed
         ));
 
+        container.add_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule));
+
         let mut resource_cache = repo.diff_resource_cache_for_tree_diff()?;
         ancestor_tree.changes()?.for_each_to_obtain_tree(
             &tree,
