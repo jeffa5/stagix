@@ -374,7 +374,7 @@ fn get_commits(
         let author = commit.author()?;
 
         pre.add_html(html::Bold::from("author "));
-        pre.add_child(format!("{} <{}>\n", author.name, author.email).into());
+        pre.add_child(escape_html(&format!("{} <{}>\n", author.name, author.email)).into());
 
         pre.add_html(html::Bold::from("date "));
         pre.add_child(author.time()?.format(ISO8601).into());
@@ -395,7 +395,9 @@ fn get_commits(
         } else {
             repo.empty_tree()
         };
-        let stats = ancestor_tree.changes()?.stats(&tree)?;
+        let mut changes = ancestor_tree.changes()?;
+        let stats = changes.stats(&tree)?;
+
         let changed = stats.files_changed.to_string();
         let added = stats.lines_added.to_string();
         let removed = stats.lines_removed.to_string();
@@ -404,9 +406,53 @@ fn get_commits(
             changed, added, removed
         ));
 
-        container.add_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule));
+        let mut diffstat_table = Table::new();
 
         let mut resource_cache = repo.diff_resource_cache_for_tree_diff()?;
+        ancestor_tree.changes()?.for_each_to_obtain_tree(
+            &tree,
+            |change| -> Result<gix::object::tree::diff::Action, std::convert::Infallible> {
+                if change.entry_mode().is_tree() {
+                    return Ok(gix::object::tree::diff::Action::Continue);
+                }
+
+                let mut diff = change.diff(&mut resource_cache).unwrap();
+                diff.lines(|change_line| -> Result<(), std::convert::Infallible> {
+                    match change_line {
+                        gix::object::blob::diff::lines::Change::Addition { lines: _ } => {
+                            diffstat_table.add_body_row(["A", change.location().to_str().unwrap()]);
+                        }
+                        gix::object::blob::diff::lines::Change::Deletion { lines: _ } => {
+                            diffstat_table.add_body_row(["D", change.location().to_str().unwrap()]);
+                        }
+                        gix::object::blob::diff::lines::Change::Modification {
+                            lines_before,
+                            lines_after,
+                        } => {
+                            diffstat_table.add_body_row([
+                                "M",
+                                change.location().to_str().unwrap(),
+                                "|",
+                                &format!("+{}, -{}", lines_after.len(), lines_before.len()),
+                                &format!(
+                                    "{}{}",
+                                    "+".repeat(lines_after.len()),
+                                    "-".repeat(lines_before.len())
+                                ),
+                            ]);
+                        }
+                    }
+                    Ok(())
+                })
+                .unwrap();
+
+                Ok(gix::object::tree::diff::Action::Continue)
+            },
+        )?;
+        container.add_table(diffstat_table);
+
+        container.add_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule));
+
         ancestor_tree.changes()?.for_each_to_obtain_tree(
             &tree,
             |change| -> Result<gix::object::tree::diff::Action, std::convert::Infallible> {
