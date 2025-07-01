@@ -402,7 +402,7 @@ fn get_commits(
         let added = stats.lines_added.to_string();
         let removed = stats.lines_removed.to_string();
         container.add_paragraph(format!(
-            "{} file changed, {} insertion(+), {} deletion(-)",
+            "{} files changed, {} insertions(+), {} deletions(-)",
             changed, added, removed
         ));
 
