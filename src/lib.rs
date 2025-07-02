@@ -271,11 +271,12 @@ fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Conta
         .with_attributes([("id", "log")])
         .with_header_row(["Time", "Commit message", "Author", "Files", "+", "-", "ID"]);
     let head = repo.head()?;
-    let revs = repo
+    let mut revs = repo
         .rev_walk([head.id().unwrap()])
         .first_parent_only()
-        .all()?;
-    for (i, rev) in revs.enumerate() {
+        .all()?
+        .enumerate();
+    for (i, rev) in &mut revs {
         if let Some(log_len) = log_length {
             if i >= log_len {
                 break;
@@ -328,6 +329,16 @@ fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Conta
                 .with_cell(TableCell::default().with_raw(id)),
         );
     }
+    let remaining = revs.count();
+    table.add_body_row([
+        "...",
+        &format!("{} more commits remaining, fetch the repository", remaining),
+        "...",
+        "...",
+        "...",
+        "...",
+        "...",
+    ]);
     container.add_table(table);
     Ok(container)
 }
