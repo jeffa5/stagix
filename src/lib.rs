@@ -464,9 +464,13 @@ fn get_commits(
                 })
                 .unwrap();
 
+                let location = change.location().to_str().unwrap();
                 diffstat_table.add_body_row([
                     marker,
-                    change.location().to_str().unwrap(),
+                    &HtmlElement::new(build_html::HtmlTag::Link)
+                        .with_attribute("href", &format!("#{}", location))
+                        .with_raw(location)
+                        .to_html_string(),
                     "|",
                     &format!("+{} -{}", lines_added, lines_removed),
                     &format!("{}{}", "+".repeat(lines_added), "-".repeat(lines_removed)),
@@ -504,6 +508,10 @@ fn get_commits(
                 };
 
                 let location_marker = format!("--- {}\n+++ {}\n", old_location, new_location);
+                let location_marker_html = HtmlElement::new(build_html::HtmlTag::Span)
+                    .with_attribute("id", new_location)
+                    .with_raw(location_marker)
+                    .to_html_string();
 
                 let old_string = ancestor_tree
                     .lookup_entry_by_path(change.location().to_str().unwrap())
@@ -526,7 +534,7 @@ fn get_commits(
                 let input = InternedInput::new(old_string.as_str(), new_string.as_str());
                 let udiff = UnifiedDiff::new(
                     &input,
-                    location_marker,
+                    String::new(),
                     NewlineSeparator::AfterHeaderAndWhenNeeded("\n"),
                     ContextSize::symmetrical(5),
                 );
@@ -534,7 +542,7 @@ fn get_commits(
                     gix::diff::blob::diff(gix::diff::blob::Algorithm::Histogram, &input, udiff)
                         .unwrap();
 
-                container.add_preformatted(diff);
+                container.add_preformatted(location_marker_html + &escape_html(&diff));
 
                 Ok(gix::object::tree::diff::Action::Continue)
             },
