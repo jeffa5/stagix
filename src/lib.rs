@@ -433,47 +433,44 @@ fn get_commits(
                     return Ok(gix::object::tree::diff::Action::Continue);
                 }
 
+                let marker = match change {
+                    gix::object::tree::diff::Change::Addition { .. } => "A",
+                    gix::object::tree::diff::Change::Deletion { .. } => "D",
+                    gix::object::tree::diff::Change::Modification { .. } => "M",
+                    gix::object::tree::diff::Change::Rewrite { .. } => "R",
+                };
+
+                let mut lines_added = 0;
+                let mut lines_removed = 0;
+
                 let mut diff = change.diff(&mut resource_cache).unwrap();
                 diff.lines(|change_line| -> Result<(), std::convert::Infallible> {
                     match change_line {
                         gix::object::blob::diff::lines::Change::Addition { lines } => {
-                            diffstat_table.add_body_row([
-                                "A",
-                                change.location().to_str().unwrap(),
-                                "|",
-                                &format!("+{}", lines.len()),
-                                &format!("{}", "+".repeat(lines.len()),),
-                            ]);
+                            lines_added += lines.len();
                         }
                         gix::object::blob::diff::lines::Change::Deletion { lines } => {
-                            diffstat_table.add_body_row([
-                                "D",
-                                change.location().to_str().unwrap(),
-                                "|",
-                                &format!("-{}", lines.len()),
-                                &format!("{}", "-".repeat(lines.len()),),
-                            ]);
+                            lines_removed += lines.len();
                         }
                         gix::object::blob::diff::lines::Change::Modification {
                             lines_before,
                             lines_after,
                         } => {
-                            diffstat_table.add_body_row([
-                                "M",
-                                change.location().to_str().unwrap(),
-                                "|",
-                                &format!("+{}, -{}", lines_after.len(), lines_before.len()),
-                                &format!(
-                                    "{}{}",
-                                    "+".repeat(lines_after.len()),
-                                    "-".repeat(lines_before.len())
-                                ),
-                            ]);
+                            lines_removed += lines_before.len();
+                            lines_added += lines_after.len();
                         }
                     }
                     Ok(())
                 })
                 .unwrap();
+
+                diffstat_table.add_body_row([
+                    marker,
+                    change.location().to_str().unwrap(),
+                    "|",
+                    &format!("+{} -{}", lines_added, lines_removed),
+                    &format!("{}{}", "+".repeat(lines_added), "-".repeat(lines_removed)),
+                ]);
 
                 Ok(gix::object::tree::diff::Action::Continue)
             },
