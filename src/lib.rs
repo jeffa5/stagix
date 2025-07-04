@@ -436,11 +436,23 @@ fn get_commits(
                 let mut diff = change.diff(&mut resource_cache).unwrap();
                 diff.lines(|change_line| -> Result<(), std::convert::Infallible> {
                     match change_line {
-                        gix::object::blob::diff::lines::Change::Addition { lines: _ } => {
-                            diffstat_table.add_body_row(["A", change.location().to_str().unwrap()]);
+                        gix::object::blob::diff::lines::Change::Addition { lines } => {
+                            diffstat_table.add_body_row([
+                                "A",
+                                change.location().to_str().unwrap(),
+                                "|",
+                                &format!("+{}", lines.len()),
+                                &format!("{}", "+".repeat(lines.len()),),
+                            ]);
                         }
-                        gix::object::blob::diff::lines::Change::Deletion { lines: _ } => {
-                            diffstat_table.add_body_row(["D", change.location().to_str().unwrap()]);
+                        gix::object::blob::diff::lines::Change::Deletion { lines } => {
+                            diffstat_table.add_body_row([
+                                "D",
+                                change.location().to_str().unwrap(),
+                                "|",
+                                &format!("-{}", lines.len()),
+                                &format!("{}", "-".repeat(lines.len()),),
+                            ]);
                         }
                         gix::object::blob::diff::lines::Change::Modification {
                             lines_before,
