@@ -5,6 +5,9 @@ use build_html::{
 };
 use gix::Repository;
 use gix::bstr::ByteSlice as _;
+use gix::diff::blob::UnifiedDiff;
+use gix::diff::blob::intern::InternedInput;
+use gix::diff::blob::unified_diff::{ContextSize, NewlineSeparator};
 use gix::objs::tree::EntryKind;
 use gix::traverse::tree::{Recorder, Visit};
 use gix_date::time::format::ISO8601;
@@ -400,7 +403,8 @@ fn get_commits(
 
         let tree = commit.tree()?;
         let ancestors = commit.ancestors().first_parent_only().all()?;
-        let ancestor_tree = if let Some(ancestor) = ancestors.skip(1).next() {
+        let ancestor = ancestors.skip(1).next();
+        let ancestor_tree = if let Some(ancestor) = ancestor {
             let commit2 = ancestor?.object()?;
             let ancestor_tree = commit2.tree()?;
             ancestor_tree
@@ -472,36 +476,57 @@ fn get_commits(
                 if change.entry_mode().is_tree() {
                     return Ok(gix::object::tree::diff::Action::Continue);
                 }
-                container.add_preformatted(format!("{}", change.location()));
-                let mut diff = change.diff(&mut resource_cache).unwrap();
-                diff.lines(|change_line| -> Result<(), std::convert::Infallible> {
-                    match change_line {
-                        gix::object::blob::diff::lines::Change::Addition { lines } => {
-                            let html_lines: Vec<String> =
-                                lines.into_iter().map(|l| format!("+ {}", l)).collect();
-                            container.add_preformatted(html_lines.join("\n"));
-                        }
-                        gix::object::blob::diff::lines::Change::Deletion { lines } => {
-                            let html_lines: Vec<String> =
-                                lines.into_iter().map(|l| format!("- {}", l)).collect();
-                            container.add_preformatted(html_lines.join("\n"));
-                        }
-                        gix::object::blob::diff::lines::Change::Modification {
-                            lines_before,
-                            lines_after,
-                        } => {
-                            let html_lines_before =
-                                lines_before.into_iter().map(|l| format!("- {}", l));
-                            let html_lines_after =
-                                lines_after.into_iter().map(|l| format!("+ {}", l));
-                            let html_lines: Vec<String> =
-                                html_lines_before.chain(html_lines_after).collect();
-                            container.add_preformatted(html_lines.join("\n"));
-                        }
+
+                let (old_location, new_location) = match change {
+                    gix::object::tree::diff::Change::Addition { location, .. } => {
+                        (location, location)
                     }
-                    Ok(())
-                })
-                .unwrap();
+                    gix::object::tree::diff::Change::Deletion { location, .. } => {
+                        (location, location)
+                    }
+                    gix::object::tree::diff::Change::Modification { location, .. } => {
+                        (location, location)
+                    }
+                    gix::object::tree::diff::Change::Rewrite {
+                        source_location,
+                        location,
+                        ..
+                    } => (source_location, location),
+                };
+
+                let location_marker = format!("--- {}\n+++ {}\n", old_location, new_location);
+
+                let old_string = ancestor_tree
+                    .lookup_entry_by_path(change.location().to_str().unwrap())
+                    .unwrap()
+                    .map_or(String::new(), |entry| {
+                        assert!(entry.mode().is_blob());
+                        let blob = entry.object().unwrap().into_blob();
+                        let string = String::from_utf8(blob.data.clone()).unwrap();
+                        string
+                    });
+                let new_string = tree
+                    .lookup_entry_by_path(change.location().to_str().unwrap())
+                    .unwrap()
+                    .map_or(String::new(), |entry| {
+                        assert!(entry.mode().is_blob());
+                        let blob = entry.object().unwrap().into_blob();
+                        let string = String::from_utf8(blob.data.clone()).unwrap();
+                        string
+                    });
+                let input = InternedInput::new(old_string.as_str(), new_string.as_str());
+                let udiff = UnifiedDiff::new(
+                    &input,
+                    location_marker,
+                    NewlineSeparator::AfterHeaderAndWhenNeeded("\n"),
+                    ContextSize::symmetrical(5),
+                );
+                let diff =
+                    gix::diff::blob::diff(gix::diff::blob::Algorithm::Histogram, &input, udiff)
+                        .unwrap();
+
+                container.add_preformatted(diff);
+
                 Ok(gix::object::tree::diff::Action::Continue)
             },
         )?;
