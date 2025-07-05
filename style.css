@@ -33,20 +33,16 @@ a.line {
 	text-decoration: none;
 }
 
-#linenos {
-	display: inline-block;
-}
-#blob {
-	display: inline-block;
+a.line {
+	user-select: none; /* Prevent selection of line numbers */
 }
 
-#linenos a {
-	color: #555;
+#blob a {
+  color: #555;
 }
 
-#linenos a:hover {
+#blob a:hover {
 	color: blue;
-	text-decoration: none;
 }
 
 table thead td {
@@ -136,9 +132,6 @@ pre a.d:hover {
 	}
 	#blob a {
 		color: #555;
-	}
-	#linenos a:target {
-		color: #eee;
 	}
 	#blob a:hover {
 		color: #56c8ff;

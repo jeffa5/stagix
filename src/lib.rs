@@ -605,24 +605,21 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
             .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule));
 
         let size = if let Ok(file_content) = str::from_utf8(&obj.data) {
-            let (line_nums, lines): (Vec<String>, Vec<String>) = file_content
+            let lines: Vec<String> = file_content
                 .lines()
                 .enumerate()
                 .map(|(i, line)| {
-                    (
-                        HtmlElement::new(build_html::HtmlTag::Span)
-                            .with_link_attr(
-                                format!("#l{}", i),
-                                format!("{: >7} ", i),
-                                [("id", i.to_string().as_str()), ("class", "line")],
-                            )
-                            .to_html_string(),
-                        escape_html(line),
-                    )
+                    let link = HtmlElement::new(build_html::HtmlTag::Link)
+                        .with_attribute("id", format!("l{}", i))
+                        .with_attribute("href", format!("#l{}", i))
+                        .with_attribute("class", "line")
+                        .with_child(format!("{: >7} ", i).into())
+                        .to_html_string();
+                    let content = escape_html(line);
+                    format!("{}{}", link, content)
                 })
-                .unzip();
+                .collect();
 
-            content.add_preformatted_attr(&line_nums.join("\n"), [("id", "linenos")]);
             content.add_preformatted_attr(&lines.join("\n"), [("id", "blob")]);
 
             format!("{}L", file_content.lines().count())
