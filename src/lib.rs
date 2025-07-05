@@ -198,7 +198,7 @@ impl Meta {
     }
 }
 
-pub fn build_index_page(repos: Vec<PathBuf>) -> anyhow::Result<()> {
+pub fn build_index_page(repos: Vec<PathBuf>, out_dir: Option<PathBuf>) -> anyhow::Result<()> {
     let index_meta = Meta {
         description: String::new(),
         url: String::new(),
@@ -224,7 +224,13 @@ pub fn build_index_page(repos: Vec<PathBuf>) -> anyhow::Result<()> {
     }
     let container = Container::new(build_html::ContainerType::Div).with_table(table);
 
-    index_meta.write_html_content("Index", "", "", container, false, &mut std::io::stdout())?;
+    if let Some(out_dir) = out_dir {
+        let mut out = File::create(out_dir.join("index.html"))?;
+        index_meta.write_html_content("Index", "", "", container, false, &mut out)?;
+    } else {
+        let mut out = std::io::stdout();
+        index_meta.write_html_content("Index", "", "", container, false, &mut out)?;
+    };
 
     Ok(())
 }
