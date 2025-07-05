@@ -597,6 +597,7 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
 
         let path = PathBuf::from(format!("{}.html", entry.filepath.to_string()));
         let mut content = Container::new(build_html::ContainerType::Div)
+            .with_attributes([("id", "content")])
             .with_paragraph(format!(
                 "{} ({}B)",
                 entry.filepath.to_string(),
