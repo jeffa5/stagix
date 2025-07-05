@@ -198,7 +198,14 @@ impl Meta {
     }
 }
 
-pub fn build_index_page(repos: Vec<PathBuf>, out_dir: Option<PathBuf>) -> anyhow::Result<()> {
+pub struct IndexOptions {
+    pub out_dir: PathBuf,
+    pub stylesheet: Option<PathBuf>,
+    pub logo: Option<PathBuf>,
+    pub favicon: Option<PathBuf>,
+}
+
+pub fn build_index_page(repos: Vec<PathBuf>, options: Option<IndexOptions>) -> anyhow::Result<()> {
     let index_meta = Meta {
         description: String::new(),
         url: String::new(),
@@ -224,9 +231,18 @@ pub fn build_index_page(repos: Vec<PathBuf>, out_dir: Option<PathBuf>) -> anyhow
     }
     let container = Container::new(build_html::ContainerType::Div).with_table(table);
 
-    if let Some(out_dir) = out_dir {
-        let mut out = File::create(out_dir.join("index.html"))?;
+    if let Some(opts) = options {
+        let mut out = File::create(opts.out_dir.join("index.html"))?;
         index_meta.write_html_content("Index", "", "", container, false, &mut out)?;
+        if let Some(stylesheet) = opts.stylesheet {
+            std::fs::copy(stylesheet, opts.out_dir.join("style.css"))?;
+        }
+        if let Some(logo) = opts.logo {
+            std::fs::copy(logo, opts.out_dir.join("logo.png"))?;
+        }
+        if let Some(favicon) = opts.favicon {
+            std::fs::copy(favicon, opts.out_dir.join("favicon.png"))?;
+        }
     } else {
         let mut out = std::io::stdout();
         index_meta.write_html_content("Index", "", "", container, false, &mut out)?;
