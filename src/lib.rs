@@ -186,7 +186,7 @@ impl Meta {
         }
 
         let page = HtmlPage::new()
-            .with_title(format!("{} - {}", title, self.name))
+            .with_title(format!("{} - {} - {}", title, self.name, self.description))
             .with_stylesheet(format!("{}style.css", to_index_root))
             .with_head_link(format!("{}favicon.png", to_index_root), "icon")
             .with_table(head_table)
@@ -349,7 +349,7 @@ fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Conta
 fn get_commits(
     repo: &Repository,
     log_length: Option<usize>,
-) -> anyhow::Result<Vec<(String, Container)>> {
+) -> anyhow::Result<Vec<(String, String, Container)>> {
     let mut containers = Vec::new();
     let head = repo.head()?;
     let revs = repo
@@ -547,7 +547,8 @@ fn get_commits(
                 Ok(gix::object::tree::diff::Action::Continue)
             },
         )?;
-        containers.push((commit.id.to_string(), container));
+        let title = message.title.to_string();
+        containers.push((commit.id.to_string(), title, container));
     }
     Ok(containers)
 }
@@ -675,9 +676,9 @@ pub fn build_repo_pages(
 
     let commits = get_commits(&repo, log_length).context("get commits")?;
     create_dir_all(out_dir.join("commits"))?;
-    for (id, commit) in commits {
+    for (id, title, commit) in commits {
         meta.write_html_content_to_file(
-            &id,
+            &title,
             &PathBuf::from("commits").join(&id).with_extension("html"),
             commit,
             true,
