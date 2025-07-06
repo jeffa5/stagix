@@ -24,6 +24,8 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    tracing_subscriber::fmt::init();
+
     stagix::build_index_page(
         args.repos,
         args.out_dir.map(|o| IndexOptions {

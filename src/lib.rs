@@ -14,6 +14,8 @@ use gix_date::time::format::ISO8601;
 use html::Bold;
 use std::fs::{File, create_dir_all, read_to_string};
 use std::path::{Path, PathBuf};
+use tracing::debug;
+use tracing::info;
 
 mod html;
 
@@ -70,6 +72,7 @@ pub struct Meta {
 
 impl Meta {
     pub fn load(repo: &Repository, path: &Path) -> anyhow::Result<Self> {
+        debug!(repo =? repo.path(), ?path, "loading metadata for repo");
         let description = Self::load_meta_file(repo, "description").unwrap_or_default();
         if description.is_empty() {
             eprintln!("no description file found");
@@ -104,6 +107,7 @@ impl Meta {
     }
 
     fn load_meta_file(repo: &Repository, name: &str) -> anyhow::Result<String> {
+        debug!(repo =? repo.path(), ?name, "loading metadata file for repo");
         let path = repo.path().join(name);
         let path = PathBuf::from(path);
         let content = read_to_string(path)?;
@@ -118,6 +122,13 @@ impl Meta {
         nav: bool,
         out_dir: &Path,
     ) -> anyhow::Result<()> {
+        debug!(
+            ?title,
+            ?filepath,
+            ?nav,
+            ?out_dir,
+            "writing html content to file"
+        );
         let path = out_dir.join(filepath);
         let mut file = File::create(&path)?;
         let to_repo_root = to_root_path(&path, out_dir);
@@ -141,6 +152,13 @@ impl Meta {
         nav: bool,
         out: &mut impl std::io::Write,
     ) -> anyhow::Result<()> {
+        debug!(
+            ?title,
+            ?to_index_root,
+            ?to_repo_root,
+            ?nav,
+            "writing html content to writer"
+        );
         let mut head_table = Table::new();
         head_table.add_body_row([
             &HtmlElement::new(build_html::HtmlTag::Div)
@@ -198,6 +216,7 @@ impl Meta {
     }
 }
 
+#[derive(Debug)]
 pub struct IndexOptions {
     pub out_dir: PathBuf,
     pub stylesheet: Option<PathBuf>,
@@ -206,6 +225,7 @@ pub struct IndexOptions {
 }
 
 pub fn build_index_page(repos: Vec<PathBuf>, options: Option<IndexOptions>) -> anyhow::Result<()> {
+    info!(num_repos = repos.len(), ?options, "building index page");
     let index_meta = Meta {
         description: String::new(),
         url: String::new(),
@@ -252,6 +272,7 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: Option<IndexOptions>) -> a
 }
 
 fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
+    debug!(repo=?repo.path(), "get refs");
     let refs = repo.references()?;
     let mut container = build_html::Container::new(build_html::ContainerType::Div);
     let mut table = build_html::Table::new()
@@ -291,6 +312,7 @@ fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
 }
 
 fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Container> {
+    debug!(repo=?repo.path(), log_length, "get log");
     let mut container = build_html::Container::new(build_html::ContainerType::Div);
     let mut table = build_html::Table::new()
         .with_attributes([("id", "log")])
@@ -372,6 +394,7 @@ fn get_commits(
     repo: &Repository,
     log_length: Option<usize>,
 ) -> anyhow::Result<Vec<(String, String, Container)>> {
+    debug!(repo=?repo.path(), log_length, "get commits");
     let mut containers = Vec::new();
     let head = repo.head()?;
     let revs = repo
@@ -576,6 +599,7 @@ fn get_commits(
 }
 
 fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Container)>)> {
+    debug!(repo=?repo.path(), "get files");
     let head_tree = repo.head_tree()?;
     let mut recorder = Recorder::default();
     head_tree.traverse().depthfirst(&mut recorder)?;
@@ -659,6 +683,7 @@ pub fn build_repo_pages(
     out_dir: &Path,
     log_length: Option<usize>,
 ) -> anyhow::Result<()> {
+    info!(?repo_path, ?out_dir, ?log_length, "build repo pages");
     let out_dir = out_dir.canonicalize()?;
     let repo = gix::open(&repo_path).context("open repo")?;
 

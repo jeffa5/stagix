@@ -15,6 +15,8 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let args = Args::parse();
 
+    tracing_subscriber::fmt::init();
+
     stagix::build_repo_pages(&args.repo, &args.out_dir, args.log_length)?;
 
     Ok(())
