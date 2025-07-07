@@ -456,21 +456,15 @@ fn get_commits(
         } else {
             repo.empty_tree()
         };
-        let mut changes = ancestor_tree.changes()?;
-        let stats = changes.stats(&tree)?;
 
-        let changed = stats.files_changed.to_string();
-        let added = stats.lines_added.to_string();
-        let removed = stats.lines_removed.to_string();
-        container.add_paragraph(format!(
-            "{} files changed, {} insertions(+), {} deletions(-)",
-            changed, added, removed
-        ));
-
-        container.add_html(Bold::from("Diffstat:"));
+        let mut total_files_changed = 0;
+        let mut total_lines_added = 0;
+        let mut total_lines_removed = 0;
         let mut diffstat_table = Table::new();
 
         let mut resource_cache = repo.diff_resource_cache_for_tree_diff()?;
+
+        let mut pre_diffs = Vec::new();
         ancestor_tree.changes()?.for_each_to_obtain_tree(
             &tree,
             |change| -> Result<gix::object::tree::diff::Action, std::convert::Infallible> {
@@ -478,6 +472,7 @@ fn get_commits(
                     return Ok(gix::object::tree::diff::Action::Continue);
                 }
 
+                // diffstat
                 let marker = match change {
                     gix::object::tree::diff::Change::Addition { .. } => "A",
                     gix::object::tree::diff::Change::Deletion { .. } => "D",
@@ -489,25 +484,13 @@ fn get_commits(
                 let mut lines_removed = 0;
 
                 let mut diff = change.diff(&mut resource_cache).unwrap();
-                diff.lines(|change_line| -> Result<(), std::convert::Infallible> {
-                    match change_line {
-                        gix::object::blob::diff::lines::Change::Addition { lines } => {
-                            lines_added += lines.len();
-                        }
-                        gix::object::blob::diff::lines::Change::Deletion { lines } => {
-                            lines_removed += lines.len();
-                        }
-                        gix::object::blob::diff::lines::Change::Modification {
-                            lines_before,
-                            lines_after,
-                        } => {
-                            lines_removed += lines_before.len();
-                            lines_added += lines_after.len();
-                        }
-                    }
-                    Ok(())
-                })
-                .unwrap();
+                if let Some(counts) = diff.line_counts().unwrap() {
+                    total_files_changed += 1;
+                    lines_added += counts.insertions as usize;
+                    lines_removed += counts.removals as usize;
+                    total_lines_added += lines_added;
+                    total_lines_removed += lines_removed;
+                }
 
                 let location = change.location().to_str().unwrap();
                 diffstat_table.add_body_row([
@@ -521,20 +504,7 @@ fn get_commits(
                     &format!("{}{}", "+".repeat(lines_added), "-".repeat(lines_removed)),
                 ]);
 
-                Ok(gix::object::tree::diff::Action::Continue)
-            },
-        )?;
-        container.add_table(diffstat_table);
-
-        container.add_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule));
-
-        ancestor_tree.changes()?.for_each_to_obtain_tree(
-            &tree,
-            |change| -> Result<gix::object::tree::diff::Action, std::convert::Infallible> {
-                if change.entry_mode().is_tree() {
-                    return Ok(gix::object::tree::diff::Action::Continue);
-                }
-
+                // unified diff
                 let (old_location, new_location) = match change {
                     gix::object::tree::diff::Change::Addition { location, .. } => {
                         (location, location)
@@ -567,7 +537,8 @@ fn get_commits(
                             .unwrap()
                             .try_into_blob()
                             .map_or(Vec::new(), |mut b| b.take_data());
-                        let string = String::from_utf8(blob).unwrap_or_else(|_|"binary_file".to_owned());
+                        let string =
+                            String::from_utf8(blob).unwrap_or_else(|_| "binary_file".to_owned());
                         string
                     });
                 let new_string = tree
@@ -579,7 +550,8 @@ fn get_commits(
                             .unwrap()
                             .try_into_blob()
                             .map_or(Vec::new(), |mut b| b.take_data());
-                        let string = String::from_utf8(blob).unwrap_or_else(|_|"binary_file".to_owned());
+                        let string =
+                            String::from_utf8(blob).unwrap_or_else(|_| "binary_file".to_owned());
                         string
                     });
                 let input = InternedInput::new(old_string.as_str(), new_string.as_str());
@@ -593,11 +565,22 @@ fn get_commits(
                     gix::diff::blob::diff(gix::diff::blob::Algorithm::Histogram, &input, udiff)
                         .unwrap();
 
-                container.add_preformatted(location_marker_html + &escape_html(&diff));
+                pre_diffs.push(location_marker_html + &escape_html(&diff));
 
                 Ok(gix::object::tree::diff::Action::Continue)
             },
         )?;
+
+        container.add_paragraph(format!(
+            "{} files changed, {} insertions(+), {} deletions(-)",
+            total_files_changed, total_lines_added, total_lines_removed
+        ));
+        container.add_html(Bold::from("Diffstat:"));
+        container.add_table(diffstat_table);
+        container.add_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule));
+        for diff in pre_diffs {
+            container.add_preformatted(diff);
+        }
         let title = message.title.to_string();
         containers.push((commit.id.to_string(), title, container));
     }
