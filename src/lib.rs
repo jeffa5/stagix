@@ -14,6 +14,7 @@ use gix_date::time::format::ISO8601;
 use html::Bold;
 use std::fs::{File, create_dir_all, read_to_string};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use tracing::debug;
 use tracing::info;
 
@@ -673,6 +674,7 @@ pub fn build_repo_pages(
     log_length: Option<usize>,
 ) -> anyhow::Result<()> {
     info!(?repo_path, ?out_dir, ?log_length, "build repo pages");
+    let start = Instant::now();
     let out_dir = out_dir.canonicalize()?;
     let repo = gix::open(&repo_path).context("open repo")?;
 
@@ -719,7 +721,7 @@ pub fn build_repo_pages(
             &out_dir,
         )?;
     }
-    info!(?out_dir, "Built repo");
+    info!(?out_dir, elapsed=? start.elapsed(), "Built repo");
     Ok(())
 }
 
