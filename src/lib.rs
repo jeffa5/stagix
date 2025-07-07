@@ -562,18 +562,24 @@ fn get_commits(
                     .lookup_entry_by_path(change.location().to_str().unwrap())
                     .unwrap()
                     .map_or(String::new(), |entry| {
-                        assert!(entry.mode().is_blob());
-                        let blob = entry.object().unwrap().into_blob();
-                        let string = String::from_utf8(blob.data.clone()).unwrap();
+                        let blob = entry
+                            .object()
+                            .unwrap()
+                            .try_into_blob()
+                            .map_or(Vec::new(), |mut b| b.take_data());
+                        let string = String::from_utf8(blob).unwrap_or_else(|_|"binary_file".to_owned());
                         string
                     });
                 let new_string = tree
                     .lookup_entry_by_path(change.location().to_str().unwrap())
                     .unwrap()
                     .map_or(String::new(), |entry| {
-                        assert!(entry.mode().is_blob());
-                        let blob = entry.object().unwrap().into_blob();
-                        let string = String::from_utf8(blob.data.clone()).unwrap();
+                        let blob = entry
+                            .object()
+                            .unwrap()
+                            .try_into_blob()
+                            .map_or(Vec::new(), |mut b| b.take_data());
+                        let string = String::from_utf8(blob).unwrap_or_else(|_|"binary_file".to_owned());
                         string
                     });
                 let input = InternedInput::new(old_string.as_str(), new_string.as_str());
@@ -730,6 +736,7 @@ pub fn build_repo_pages(
             &out_dir,
         )?;
     }
+    info!(?out_dir, "Built repo");
     Ok(())
 }
 
