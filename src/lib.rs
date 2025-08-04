@@ -88,6 +88,7 @@ impl Meta {
         }
         let name = path
             .canonicalize()?
+            .with_extension("")
             .file_name()
             .unwrap()
             .to_string_lossy()
