@@ -13,8 +13,29 @@
     pkgs = nixpkgs.legacyPackages.${system};
     cargoNix = pkgs.callPackage ./Cargo.nix {};
     packages = pkgs.lib.mapAttrs (name: crate: crate.build) cargoNix.workspaceMembers;
+    fs = pkgs.lib.fileset;
+    stagix-assets = pkgs.stdenv.mkDerivation {
+      pname = "stagix-assets";
+      version = "0.1.0";
+      src = fs.toSource {
+        root = ./.;
+        fileset = fs.unions [./style.css ./logo.png ./favicon.png];
+      };
+      installPhase = ''
+        mkdir -p $out/share/doc/stagix
+        cp $src/* $out/share/doc/stagix/
+      '';
+    };
   in {
-    packages.${system} = packages;
+    packages.${system} =
+      packages
+      // {
+        inherit stagix-assets;
+        stagix = pkgs.symlinkJoin {
+          name = "stagix";
+          paths = [packages.stagix stagix-assets];
+        };
+      };
 
     devShells.${system}.default = pkgs.mkShell {
       packages = [
