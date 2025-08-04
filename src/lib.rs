@@ -379,15 +379,17 @@ fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Conta
         );
     }
     let remaining = revs.count();
-    table.add_body_row([
-        "...",
-        &format!("{} more commits remaining, fetch the repository", remaining),
-        "...",
-        "...",
-        "...",
-        "...",
-        "...",
-    ]);
+    if remaining > 0 {
+        table.add_body_row([
+            "...",
+            &format!("{} more commits remaining, fetch the repository", remaining),
+            "...",
+            "...",
+            "...",
+            "...",
+            "...",
+        ]);
+    }
     container.add_table(table);
     Ok(container)
 }
