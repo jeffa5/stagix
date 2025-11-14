@@ -15,8 +15,8 @@ use html::Bold;
 use std::fs::{File, create_dir_all, read_to_string};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use tracing::debug;
 use tracing::info;
+use tracing::{debug, warn};
 
 mod html;
 
@@ -241,15 +241,9 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: Option<IndexOptions>) -> a
         .with_attributes([("id", "index")])
         .with_header_row(["Name", "Description", "Owner", "Last commit"]);
     for repo_path in repos {
-        let repo = gix::open(&repo_path)?;
-        let head = repo.head_commit()?;
-        let time = head.time()?.format(ISO8601);
-        let meta = Meta::load(&repo, &repo_path)?;
-        let name = HtmlElement::new(build_html::HtmlTag::Link)
-            .with_attribute("href", format!("{}/log.html", meta.name))
-            .with_raw(&meta.name)
-            .to_html_string();
-        table.add_body_row([name, meta.description, meta.owner, time]);
+        if let Err(error) = add_row_for_repo_index(&repo_path, &mut table) {
+            warn!(?repo_path, %error, "Failed to add index row for repo");
+        }
     }
     let container = Container::new(build_html::ContainerType::Div).with_table(table);
 
@@ -270,6 +264,19 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: Option<IndexOptions>) -> a
         index_meta.write_html_content("Index", "", "", container, false, &mut out)?;
     };
 
+    Ok(())
+}
+
+fn add_row_for_repo_index(repo_path: &Path, table: &mut Table) -> anyhow::Result<()> {
+    let repo = gix::open(&repo_path)?;
+    let head = repo.head_commit()?;
+    let time = head.time()?.format(ISO8601);
+    let meta = Meta::load(&repo, &repo_path)?;
+    let name = HtmlElement::new(build_html::HtmlTag::Link)
+        .with_attribute("href", format!("{}/log.html", meta.name))
+        .with_raw(&meta.name)
+        .to_html_string();
+    table.add_body_row([name, meta.description, meta.owner, time]);
     Ok(())
 }
 
