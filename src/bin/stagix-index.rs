@@ -19,6 +19,9 @@ struct Args {
     /// Path to png favicon that will be copied next to the `index.html`, requires --out-dir
     #[clap(long, requires = "out_dir")]
     favicon: Option<PathBuf>,
+    /// URL to use as the base for pages links.
+    #[clap(long)]
+    pages_url: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -28,12 +31,13 @@ fn main() -> anyhow::Result<()> {
 
     stagix::build_index_page(
         args.repos,
-        args.out_dir.map(|o| IndexOptions {
-            out_dir: o,
+        IndexOptions {
+            out_dir: args.out_dir,
             stylesheet: args.stylesheet,
             logo: args.logo,
             favicon: args.favicon,
-        }),
+            pages_url: args.pages_url,
+        },
     )?;
 
     Ok(())

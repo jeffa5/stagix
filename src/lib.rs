@@ -229,13 +229,14 @@ impl Meta {
 
 #[derive(Debug)]
 pub struct IndexOptions {
-    pub out_dir: PathBuf,
+    pub out_dir: Option<PathBuf>,
     pub stylesheet: Option<PathBuf>,
     pub logo: Option<PathBuf>,
     pub favicon: Option<PathBuf>,
+    pub pages_url: Option<String>,
 }
 
-pub fn build_index_page(repos: Vec<PathBuf>, options: Option<IndexOptions>) -> anyhow::Result<()> {
+pub fn build_index_page(repos: Vec<PathBuf>, options: IndexOptions) -> anyhow::Result<()> {
     info!(num_repos = repos.len(), ?options, "building index page");
     let index_meta = Meta {
         description: String::new(),
@@ -247,27 +248,29 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: Option<IndexOptions>) -> a
         license: None,
     };
 
+    let pages_url = options.pages_url.as_deref();
+
     let mut table = Table::new()
         .with_attributes([("id", "index")])
-        .with_header_row(["Name", "Description", "Owner", "Last commit"]);
+        .with_header_row(["Name", "Description", "Owner", "Last commit", "Pages URL"]);
     for repo_path in repos {
-        if let Err(error) = add_row_for_repo_index(&repo_path, &mut table) {
+        if let Err(error) = add_row_for_repo_index(&repo_path, pages_url, &mut table) {
             warn!(?repo_path, %error, "Failed to add index row for repo");
         }
     }
     let container = Container::new(build_html::ContainerType::Div).with_table(table);
 
-    if let Some(opts) = options {
-        let mut out = File::create(opts.out_dir.join("index.html"))?;
+    if let Some(out_dir) = options.out_dir {
+        let mut out = File::create(out_dir.join("index.html"))?;
         index_meta.write_html_content("Index", "", "", container, false, &mut out)?;
-        if let Some(stylesheet) = opts.stylesheet {
-            std::fs::copy(stylesheet, opts.out_dir.join("style.css"))?;
+        if let Some(stylesheet) = options.stylesheet {
+            std::fs::copy(stylesheet, out_dir.join("style.css"))?;
         }
-        if let Some(logo) = opts.logo {
-            std::fs::copy(logo, opts.out_dir.join("logo.png"))?;
+        if let Some(logo) = options.logo {
+            std::fs::copy(logo, out_dir.join("logo.png"))?;
         }
-        if let Some(favicon) = opts.favicon {
-            std::fs::copy(favicon, opts.out_dir.join("favicon.png"))?;
+        if let Some(favicon) = options.favicon {
+            std::fs::copy(favicon, out_dir.join("favicon.png"))?;
         }
     } else {
         let mut out = std::io::stdout();
@@ -399,7 +402,11 @@ fn find_root_of_docs_dir<'a, 'repo>(
     Err(anyhow::anyhow!("root of docs dir not found"))
 }
 
-fn add_row_for_repo_index(repo_path: &Path, table: &mut Table) -> anyhow::Result<()> {
+fn add_row_for_repo_index(
+    repo_path: &Path,
+    pages_url: Option<&str>,
+    table: &mut Table,
+) -> anyhow::Result<()> {
     let repo = gix::open(&repo_path)?;
     let head = repo.head_commit()?;
     let time = head.time()?.format(ISO8601);
@@ -408,7 +415,24 @@ fn add_row_for_repo_index(repo_path: &Path, table: &mut Table) -> anyhow::Result
         .with_attribute("href", format!("{}/log.html", meta.name))
         .with_raw(&meta.name)
         .to_html_string();
-    table.add_body_row([name, meta.description, meta.owner, time]);
+    let pages_url = meta
+        .pages
+        .and_then(|pages| {
+            pages_url.map(|pages_url| {
+                let pages_full_url = if pages_url.is_empty() {
+                    pages.clone()
+                } else {
+                    format!("{pages_url}/{pages}")
+                };
+                HtmlElement::new(build_html::HtmlTag::Link)
+                    .with_attribute("href", pages_full_url)
+                    .with_raw(&pages)
+                    .to_html_string()
+            })
+        })
+        .unwrap_or_default();
+
+    table.add_body_row([name, meta.description, meta.owner, time, pages_url]);
     Ok(())
 }
 
