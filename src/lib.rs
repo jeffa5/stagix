@@ -3,17 +3,17 @@ use build_html::{
     Container, Html as _, HtmlContainer as _, HtmlElement, HtmlPage, Table, TableCell, TableRow,
     escape_html,
 };
-use gix::Repository;
 use gix::bstr::ByteSlice as _;
 use gix::diff::blob::UnifiedDiff;
 use gix::diff::blob::intern::InternedInput;
 use gix::diff::blob::unified_diff::{ContextSize, NewlineSeparator};
 use gix::objs::tree::EntryKind;
 use gix::traverse::tree::{Recorder, Visit};
+use gix::{Repository, Tree};
 use gix_date::time::format::ISO8601;
 use html::Bold;
-use std::fs::{File, create_dir_all, read_to_string};
-use std::path::{Path, PathBuf};
+use std::fs::{File, create_dir, create_dir_all, read_to_string, remove_dir_all, rename};
+use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 use tracing::info;
 use tracing::{debug, warn};
@@ -67,6 +67,7 @@ pub struct Meta {
     pub url: String,
     pub name: String,
     pub owner: String,
+    pub pages: Option<String>,
     pub readme: Option<String>,
     pub license: Option<String>,
 }
@@ -74,17 +75,21 @@ pub struct Meta {
 impl Meta {
     pub fn load(repo: &Repository, path: &Path) -> anyhow::Result<Self> {
         debug!(repo =? repo.path(), ?path, "loading metadata for repo");
-        let description = Self::load_meta_file(repo, "description").unwrap_or_default();
+        let description = Self::load_meta_file(repo, "description")?.unwrap_or_default();
         if description.is_empty() {
             eprintln!("no description file found");
         }
-        let url = Self::load_meta_file(repo, "url").unwrap_or_default();
+        let url = Self::load_meta_file(repo, "url")?.unwrap_or_default();
         if url.is_empty() {
             eprintln!("no url file found");
         }
-        let owner = Self::load_meta_file(repo, "owner").unwrap_or_default();
+        let owner = Self::load_meta_file(repo, "owner")?.unwrap_or_default();
         if owner.is_empty() {
             eprintln!("no owner file found");
+        }
+        let pages = Self::load_meta_file(repo, "pages")?;
+        if pages.is_none() {
+            eprintln!("no pages file found");
         }
         let name = path
             .canonicalize()?
@@ -103,17 +108,21 @@ impl Meta {
             url,
             name,
             owner,
+            pages,
             readme: delegate.readme,
             license: delegate.license,
         })
     }
 
-    fn load_meta_file(repo: &Repository, name: &str) -> anyhow::Result<String> {
+    fn load_meta_file(repo: &Repository, name: &str) -> anyhow::Result<Option<String>> {
         debug!(repo =? repo.path(), ?name, "loading metadata file for repo");
         let path = repo.path().join(name);
         let path = PathBuf::from(path);
-        let content = read_to_string(path)?;
-        Ok(content)
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let content = read_to_string(path)?.trim().to_owned();
+        Ok(Some(content))
     }
 
     pub fn write_html_content_to_file(
@@ -233,6 +242,7 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: Option<IndexOptions>) -> a
         url: String::new(),
         name: "Repositories".to_owned(),
         owner: String::new(),
+        pages: None,
         readme: None,
         license: None,
     };
@@ -265,6 +275,128 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: Option<IndexOptions>) -> a
     };
 
     Ok(())
+}
+
+#[derive(Debug)]
+pub struct PagesOptions {
+    pub out_dir: PathBuf,
+    pub working_dir: PathBuf,
+}
+
+pub fn build_pages_dirs(repos: Vec<PathBuf>, options: PagesOptions) -> anyhow::Result<()> {
+    info!(num_repos = repos.len(), ?options, "building pages dir");
+
+    for repo_path in repos {
+        if options.working_dir.exists() {
+            remove_dir_all(&options.working_dir)?;
+        }
+        create_dir_all(&options.working_dir)?;
+        let abs_repo_path = repo_path.canonicalize()?;
+        if let Err(error) =
+            copy_docs_to_out_dir(&abs_repo_path, &options.out_dir, &options.working_dir)
+        {
+            warn!(?repo_path, out_dir =? options.out_dir, %error, "Failed to copy docs to out_dir");
+        }
+    }
+
+    Ok(())
+}
+
+fn copy_docs_to_out_dir(
+    repo_path: &Path,
+    out_dir: &Path,
+    working_dir: &Path,
+) -> anyhow::Result<()> {
+    debug!(?repo_path, ?out_dir, "Copying docs to out dir");
+    let repo = gix::open(&repo_path)?;
+    let head = repo.head_commit()?;
+    let meta = Meta::load(&repo, &repo_path)?;
+
+    let Some(repo_name) = repo_path.file_stem() else {
+        anyhow::bail!("no repo name found")
+    };
+
+    let Some(docs_dir) = meta.pages else {
+        return Ok(());
+    };
+
+    let docs_dir = if docs_dir.is_empty() {
+        PathBuf::new()
+    } else {
+        PathBuf::from(docs_dir)
+    };
+
+    let docs_dir_parts = docs_dir.components();
+
+    let root_tree = find_root_of_docs_dir(docs_dir_parts, head.tree()?)?;
+
+    copy_tree_to_dir(root_tree, working_dir)?;
+
+    let repo_out_dir = out_dir.join(repo_name);
+    create_dir_all(&repo_out_dir)?;
+    remove_dir_all(&repo_out_dir)?;
+    debug!(
+        ?working_dir,
+        ?repo_out_dir,
+        "Moving temporary dir to out dir"
+    );
+    rename(working_dir, repo_out_dir)?;
+
+    Ok(())
+}
+
+fn copy_tree_to_dir(tree: Tree<'_>, tmpdir: &Path) -> anyhow::Result<()> {
+    debug!(?tmpdir, "Copying tree to temporary dir");
+    for entry in tree.iter() {
+        let entry = entry?;
+        let filename = entry.filename();
+        if entry.mode().is_blob() {
+            let blob = entry.object()?.into_blob();
+            let file_path = tmpdir.join(filename.to_str()?);
+            std::fs::write(file_path, &blob.data)?;
+        } else if entry.mode().is_tree() {
+            let tree = entry.object()?.peel_to_tree()?;
+            let dir_path = tmpdir.join(filename.to_str()?);
+            create_dir(&dir_path)?;
+            copy_tree_to_dir(tree, &dir_path)?;
+        } else {
+            warn!(
+                ?tmpdir,
+                ?filename,
+                "unmatched mode in copy_tree_to_dir, not copying it"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn find_root_of_docs_dir<'a, 'repo>(
+    mut docs_dir: impl Iterator<Item = Component<'a>>,
+    tree: Tree<'repo>,
+) -> anyhow::Result<Tree<'repo>> {
+    let Some(next_component) = docs_dir.next() else {
+        debug!("found root of docs dir");
+        return Ok(tree);
+    };
+    debug!(
+        ?next_component,
+        "find_root_of_docs_dir, looking for next piece"
+    );
+    let next_component = next_component.as_os_str().to_str().unwrap();
+
+    for entry in tree.iter() {
+        let entry = entry?;
+        let filename = entry.filename();
+        let kind = entry.mode().kind();
+        if filename == next_component && entry.mode().is_tree() {
+            let tree = entry.object()?.peel_to_tree()?;
+            return find_root_of_docs_dir(docs_dir, tree);
+        }
+        println!("found pages_dir in root {filename:?}, {kind:?}")
+    }
+
+    Err(anyhow::anyhow!("root of docs dir not found"))
 }
 
 fn add_row_for_repo_index(repo_path: &Path, table: &mut Table) -> anyhow::Result<()> {

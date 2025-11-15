@@ -17,3 +17,6 @@ name = "stagix-repo"
 
 [[bin]]
 name = "stagix-index"
+
+[[bin]]
+name = "stagix-pages"
