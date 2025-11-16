@@ -14,7 +14,7 @@ use gix_date::time::format::ISO8601;
 use html::Bold;
 use nix::fcntl::{OFlag, RenameFlags, open, renameat2};
 use nix::sys::stat::Mode;
-use std::fs::{File, create_dir, create_dir_all, read_to_string, remove_dir_all};
+use std::fs::{File, create_dir, create_dir_all, read_to_string, remove_dir_all, remove_file};
 use std::os::unix::fs::symlink;
 use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
@@ -250,13 +250,25 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: IndexOptions) -> anyhow::R
         let mut out = File::create(out_dir.join("index.html"))?;
         index_meta.write_html_content("Index", "", "", container, false, &mut out)?;
         if let Some(stylesheet) = options.stylesheet {
-            symlink(stylesheet, out_dir.join("style.css")).context("symlink style.css")?;
+            let out_style = out_dir.join("style.css");
+            if out_style.exists() {
+                remove_file(&out_style)?;
+            }
+            symlink(stylesheet, out_style).context("symlink style.css")?;
         }
         if let Some(logo) = options.logo {
-            symlink(logo, out_dir.join("logo.png")).context("symlink logo.png")?;
+            let out_logo = out_dir.join("logo.png");
+            if out_logo.exists() {
+                remove_file(&out_logo)?;
+            }
+            symlink(logo, out_logo).context("symlink logo.png")?;
         }
         if let Some(favicon) = options.favicon {
-            symlink(favicon, out_dir.join("favicon.png")).context("symlink favicon.png")?;
+            let out_favicon = out_dir.join("favicon.png");
+            if out_favicon.exists() {
+                remove_file(&out_favicon)?;
+            }
+            symlink(favicon, out_favicon).context("symlink favicon.png")?;
         }
     } else {
         let mut out = std::io::stdout();
