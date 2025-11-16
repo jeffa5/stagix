@@ -252,13 +252,13 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: IndexOptions) -> anyhow::R
         let mut out = File::create(out_dir.join("index.html"))?;
         index_meta.write_html_content("Index", "", "", container, false, &mut out)?;
         if let Some(stylesheet) = options.stylesheet {
-            std::fs::copy(stylesheet, out_dir.join("style.css"))?;
+            std::fs::copy(stylesheet, out_dir.join("style.css")).context("copy style.css")?;
         }
         if let Some(logo) = options.logo {
-            std::fs::copy(logo, out_dir.join("logo.png"))?;
+            std::fs::copy(logo, out_dir.join("logo.png")).context("copy logo.png")?;
         }
         if let Some(favicon) = options.favicon {
-            std::fs::copy(favicon, out_dir.join("favicon.png"))?;
+            std::fs::copy(favicon, out_dir.join("favicon.png")).context("copy favicon.png")?;
         }
     } else {
         let mut out = std::io::stdout();
