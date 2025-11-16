@@ -510,8 +510,8 @@ fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Conta
         let name = author.name.to_string();
         let time = author.time()?.format(ISO8601);
         let tree = commit.tree()?;
-        let ancestors = commit.ancestors().first_parent_only().all()?;
-        let ancestor_tree = if let Some(ancestor) = ancestors.skip(1).next() {
+        let mut ancestors = commit.ancestors().first_parent_only().all()?;
+        let ancestor_tree = if let Some(ancestor) = ancestors.nth(1) {
             let commit2 = ancestor?.object()?;
 
             commit2.tree()?
@@ -619,8 +619,8 @@ fn get_commits(
         container.add_paragraph(message.body.map_or(String::new(), |s| s.to_string()));
 
         let tree = commit.tree()?;
-        let ancestors = commit.ancestors().first_parent_only().all()?;
-        let ancestor = ancestors.skip(1).next();
+        let mut ancestors = commit.ancestors().first_parent_only().all()?;
+        let ancestor = ancestors.nth(1);
         let ancestor_tree = if let Some(ancestor) = ancestor {
             let commit2 = ancestor?.object()?;
 
