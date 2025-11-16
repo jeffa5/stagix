@@ -265,7 +265,13 @@ pub struct PagesOptions {
 pub fn build_pages_dirs(repos: Vec<PathBuf>, options: PagesOptions) -> anyhow::Result<()> {
     info!(num_repos = repos.len(), ?options, "building pages dir");
 
+    if !options.out_dir.exists(){
+        create_dir_all(&options.out_dir)?;
+    }
     let out_dir = options.out_dir.canonicalize()?;
+    if !options.working_dir.exists(){
+        create_dir_all(&options.working_dir)?;
+    }
     let working_dir = options.working_dir.canonicalize()?;
 
     for repo_path in repos {
