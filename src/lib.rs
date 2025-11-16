@@ -8,7 +8,7 @@ use gix::diff::blob::UnifiedDiff;
 use gix::diff::blob::intern::InternedInput;
 use gix::diff::blob::unified_diff::{ContextSize, NewlineSeparator};
 use gix::objs::tree::EntryKind;
-use gix::traverse::tree::{Recorder, Visit};
+use gix::traverse::tree::Recorder;
 use gix::{Repository, Tree};
 use gix_date::time::format::ISO8601;
 use html::Bold;
@@ -24,44 +24,6 @@ mod html;
 
 const README_FILES: [&str; 2] = ["README", "README.md"];
 const LICENSE_FILES: [&str; 3] = ["LICENSE", "LICENSE.md", "COPYING"];
-
-#[derive(Default)]
-struct MetaDelegate {
-    readme: Option<String>,
-    license: Option<String>,
-}
-
-impl Visit for MetaDelegate {
-    fn pop_back_tracked_path_and_set_current(&mut self) {}
-
-    fn pop_front_tracked_path_and_set_current(&mut self) {}
-
-    fn push_back_tracked_path_component(&mut self, _component: &gix::bstr::BStr) {}
-
-    fn push_path_component(&mut self, _component: &gix::bstr::BStr) {}
-
-    fn pop_path_component(&mut self) {}
-
-    fn visit_tree(
-        &mut self,
-        _entry: &gix::objs::tree::EntryRef<'_>,
-    ) -> gix::traverse::tree::visit::Action {
-        gix::traverse::tree::visit::Action::Skip
-    }
-
-    fn visit_nontree(
-        &mut self,
-        entry: &gix::objs::tree::EntryRef<'_>,
-    ) -> gix::traverse::tree::visit::Action {
-        let filename = entry.filename.to_string();
-        if README_FILES.contains(&filename.as_str()) {
-            self.readme = Some(filename);
-        } else if LICENSE_FILES.contains(&filename.as_str()) {
-            self.license = Some(filename);
-        }
-        gix::traverse::tree::visit::Action::Continue
-    }
-}
 
 #[derive(Debug)]
 pub struct Meta {
@@ -102,8 +64,20 @@ impl Meta {
             .into_owned();
 
         let head_tree = repo.head_tree()?;
-        let mut delegate = MetaDelegate::default();
-        head_tree.traverse().breadthfirst(&mut delegate)?;
+        let mut readme = None;
+        let mut license = None;
+        for entry in head_tree.iter() {
+            let entry = entry?;
+            if !entry.mode().is_blob() {
+                continue;
+            }
+            let filename = entry.filename().to_string();
+            if README_FILES.contains(&filename.as_str()) {
+                readme = Some(filename);
+            } else if LICENSE_FILES.contains(&filename.as_str()) {
+                license = Some(filename);
+            }
+        }
 
         Ok(Meta {
             description,
@@ -111,8 +85,8 @@ impl Meta {
             name,
             owner,
             pages,
-            readme: delegate.readme,
-            license: delegate.license,
+            readme,
+            license,
         })
     }
 
