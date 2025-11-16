@@ -12,6 +12,8 @@ use gix::traverse::tree::{Recorder, Visit};
 use gix::{Repository, Tree};
 use gix_date::time::format::ISO8601;
 use html::Bold;
+use nix::fcntl::{OFlag, RenameFlags, open, renameat2};
+use nix::sys::stat::Mode;
 use std::fs::{File, create_dir, create_dir_all, read_to_string, remove_dir_all, rename};
 use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
@@ -289,16 +291,17 @@ pub struct PagesOptions {
 pub fn build_pages_dirs(repos: Vec<PathBuf>, options: PagesOptions) -> anyhow::Result<()> {
     info!(num_repos = repos.len(), ?options, "building pages dir");
 
+    let out_dir = options.out_dir.canonicalize()?;
+    let working_dir = options.working_dir.canonicalize()?;
+
     for repo_path in repos {
         if options.working_dir.exists() {
-            remove_dir_all(&options.working_dir)?;
+            remove_dir_all(&working_dir)?;
         }
-        create_dir_all(&options.working_dir)?;
+        create_dir_all(&working_dir)?;
         let abs_repo_path = repo_path.canonicalize()?;
-        if let Err(error) =
-            copy_docs_to_out_dir(&abs_repo_path, &options.out_dir, &options.working_dir)
-        {
-            warn!(?repo_path, out_dir =? options.out_dir, %error, "Failed to copy docs to out_dir");
+        if let Err(error) = copy_docs_to_out_dir(&abs_repo_path, &out_dir, &working_dir) {
+            warn!(?repo_path, ?out_dir, %error, "Failed to copy docs to out_dir");
         }
     }
 
@@ -337,34 +340,52 @@ fn copy_docs_to_out_dir(
 
     let repo_out_dir = out_dir.join(repo_name);
     create_dir_all(&repo_out_dir)?;
-    remove_dir_all(&repo_out_dir)?;
     debug!(
         ?working_dir,
         ?repo_out_dir,
-        "Moving temporary dir to out dir"
+        "Moving working dir to repo out dir"
     );
-    rename(working_dir, repo_out_dir)?;
+    let working_dir_fd = open(
+        working_dir,
+        OFlag::O_DIRECTORY | OFlag::O_PATH,
+        Mode::S_IWUSR | Mode::S_IWGRP,
+    )?;
+    let repo_out_dir_fd = open(
+        &repo_out_dir,
+        OFlag::O_DIRECTORY | OFlag::O_PATH,
+        Mode::S_IWUSR | Mode::S_IWGRP,
+    )?;
+    // swap the directories atomically
+    renameat2(
+        working_dir_fd,
+        working_dir,
+        repo_out_dir_fd,
+        &repo_out_dir,
+        RenameFlags::RENAME_EXCHANGE,
+    )?;
+    // clean up the working dir
+    remove_dir_all(&working_dir)?;
 
     Ok(())
 }
 
-fn copy_tree_to_dir(tree: Tree<'_>, tmpdir: &Path) -> anyhow::Result<()> {
-    debug!(?tmpdir, "Copying tree to temporary dir");
+fn copy_tree_to_dir(tree: Tree<'_>, working_dir: &Path) -> anyhow::Result<()> {
+    debug!(?working_dir, "Copying tree to temporary dir");
     for entry in tree.iter() {
         let entry = entry?;
         let filename = entry.filename();
         if entry.mode().is_blob() {
             let blob = entry.object()?.into_blob();
-            let file_path = tmpdir.join(filename.to_str()?);
+            let file_path = working_dir.join(filename.to_str()?);
             std::fs::write(file_path, &blob.data)?;
         } else if entry.mode().is_tree() {
             let tree = entry.object()?.peel_to_tree()?;
-            let dir_path = tmpdir.join(filename.to_str()?);
+            let dir_path = working_dir.join(filename.to_str()?);
             create_dir(&dir_path)?;
             copy_tree_to_dir(tree, &dir_path)?;
         } else {
             warn!(
-                ?tmpdir,
+                ?working_dir,
                 ?filename,
                 "unmatched mode in copy_tree_to_dir, not copying it"
             );
