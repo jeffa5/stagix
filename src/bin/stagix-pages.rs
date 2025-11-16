@@ -14,6 +14,24 @@ struct Args {
     /// filesytem as the out_dir.
     #[clap(long)]
     working_dir: PathBuf,
+
+    /// Whether or not to create an index page, the same as stagix-index.
+    #[clap(long)]
+    index: bool,
+
+    // index options
+    /// Path to css stylesheet that will be copied next to the `index.html`, requires --out-dir
+    #[clap(long)]
+    stylesheet: Option<PathBuf>,
+    /// Path to png logo that will be copied next to the `index.html`, requires --out-dir
+    #[clap(long)]
+    logo: Option<PathBuf>,
+    /// Path to png favicon that will be copied next to the `index.html`, requires --out-dir
+    #[clap(long)]
+    favicon: Option<PathBuf>,
+    /// URL to use as the base for pages links.
+    #[clap(long)]
+    pages_url: Option<String>,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -24,8 +42,15 @@ fn main() -> anyhow::Result<()> {
     stagix::build_pages_dirs(
         args.repos,
         PagesOptions {
-            out_dir: args.out_dir,
+            out_dir: args.out_dir.clone(),
             working_dir: args.working_dir,
+            index: args.index.then(|| stagix::IndexOptions {
+                out_dir: Some(args.out_dir),
+                stylesheet: args.stylesheet,
+                logo: args.logo,
+                favicon: args.favicon,
+                pages_url: args.pages_url,
+            }),
         },
     )?;
 

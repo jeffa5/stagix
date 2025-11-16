@@ -266,6 +266,7 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: IndexOptions) -> anyhow::R
 pub struct PagesOptions {
     pub out_dir: PathBuf,
     pub working_dir: PathBuf,
+    pub index: Option<IndexOptions>,
 }
 
 pub fn build_pages_dirs(repos: Vec<PathBuf>, options: PagesOptions) -> anyhow::Result<()> {
@@ -280,7 +281,7 @@ pub fn build_pages_dirs(repos: Vec<PathBuf>, options: PagesOptions) -> anyhow::R
     }
     let working_dir = options.working_dir.canonicalize()?;
 
-    for repo_path in repos {
+    for repo_path in &repos {
         if options.working_dir.exists() {
             remove_dir_all(&working_dir)?;
         }
@@ -289,6 +290,10 @@ pub fn build_pages_dirs(repos: Vec<PathBuf>, options: PagesOptions) -> anyhow::R
         if let Err(error) = copy_docs_to_out_dir(&abs_repo_path, &out_dir, &working_dir) {
             warn!(?repo_path, ?out_dir, %error, "Failed to copy docs to out_dir");
         }
+    }
+
+    if let Some(index) = options.index {
+        build_index_page(repos, index)?;
     }
 
     Ok(())
