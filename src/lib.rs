@@ -41,19 +41,19 @@ impl Meta {
         debug!(repo =? repo.path(), ?path, "loading metadata for repo");
         let description = Self::load_meta_file(repo, "description")?.unwrap_or_default();
         if description.is_empty() {
-            eprintln!("no description file found");
+            debug!("no description file found");
         }
         let url = Self::load_meta_file(repo, "url")?.unwrap_or_default();
         if url.is_empty() {
-            eprintln!("no url file found");
+            debug!("no url file found");
         }
         let owner = Self::load_meta_file(repo, "owner")?.unwrap_or_default();
         if owner.is_empty() {
-            eprintln!("no owner file found");
+            debug!("no owner file found");
         }
         let pages = Self::load_meta_file(repo, "pages")?;
         if pages.is_none() {
-            eprintln!("no pages file found");
+            debug!("no pages file found");
         }
         let name = path
             .canonicalize()?
