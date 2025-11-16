@@ -781,11 +781,7 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
         let path = PathBuf::from(format!("{}.html", entry.filepath));
         let mut content = Container::new(build_html::ContainerType::Div)
             .with_attributes([("id", "content")])
-            .with_paragraph(format!(
-                "{} ({}B)",
-                entry.filepath,
-                obj.data.len()
-            ))
+            .with_paragraph(format!("{} ({}B)", entry.filepath, obj.data.len()))
             .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule));
 
         let size = if let Ok(file_content) = str::from_utf8(&obj.data) {
