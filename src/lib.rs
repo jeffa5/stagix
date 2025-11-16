@@ -93,7 +93,6 @@ impl Meta {
     fn load_meta_file(repo: &Repository, name: &str) -> anyhow::Result<Option<String>> {
         debug!(repo =? repo.path(), ?name, "loading metadata file for repo");
         let path = repo.path().join(name);
-        let path = PathBuf::from(path);
         if !path.is_file() {
             return Ok(None);
         }
@@ -150,7 +149,7 @@ impl Meta {
         head_table.add_body_row([
             &HtmlElement::new(build_html::HtmlTag::Div)
                 .with_link(
-                    &format!("{}index.html", to_index_root),
+                    format!("{}index.html", to_index_root),
                     HtmlElement::new(build_html::HtmlTag::Div)
                         .with_image_attr(
                             format!("{}logo.png", to_index_root),
@@ -305,9 +304,9 @@ fn copy_docs_to_out_dir(
     working_dir: &Path,
 ) -> anyhow::Result<()> {
     debug!(?repo_path, ?out_dir, "Copying docs to out dir");
-    let repo = gix::open(&repo_path)?;
+    let repo = gix::open(repo_path)?;
     let head = repo.head_commit()?;
-    let meta = Meta::load(&repo, &repo_path)?;
+    let meta = Meta::load(&repo, repo_path)?;
 
     let Some(repo_name) = repo_path.file_stem() else {
         anyhow::bail!("no repo name found")
@@ -355,7 +354,7 @@ fn copy_docs_to_out_dir(
         RenameFlags::RENAME_EXCHANGE,
     )?;
     // clean up the working dir
-    remove_dir_all(&working_dir)?;
+    remove_dir_all(working_dir)?;
 
     Ok(())
 }
@@ -417,10 +416,10 @@ fn add_row_for_repo_index(
     pages_url: Option<&str>,
     table: &mut Table,
 ) -> anyhow::Result<()> {
-    let repo = gix::open(&repo_path)?;
+    let repo = gix::open(repo_path)?;
     let head = repo.head_commit()?;
     let time = head.time()?.format(ISO8601);
-    let meta = Meta::load(&repo, &repo_path)?;
+    let meta = Meta::load(&repo, repo_path)?;
     let name = HtmlElement::new(build_html::HtmlTag::Link)
         .with_attribute("href", format!("{}/log.html", meta.name))
         .with_raw(&meta.name)
@@ -514,8 +513,8 @@ fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Conta
         let ancestors = commit.ancestors().first_parent_only().all()?;
         let ancestor_tree = if let Some(ancestor) = ancestors.skip(1).next() {
             let commit2 = ancestor?.object()?;
-            let ancestor_tree = commit2.tree()?;
-            ancestor_tree
+
+            commit2.tree()?
         } else {
             repo.empty_tree()
         };
@@ -624,8 +623,8 @@ fn get_commits(
         let ancestor = ancestors.skip(1).next();
         let ancestor_tree = if let Some(ancestor) = ancestor {
             let commit2 = ancestor?.object()?;
-            let ancestor_tree = commit2.tree()?;
-            ancestor_tree
+
+            commit2.tree()?
         } else {
             repo.empty_tree()
         };
@@ -669,7 +668,7 @@ fn get_commits(
                 diffstat_table.add_body_row([
                     marker,
                     &HtmlElement::new(build_html::HtmlTag::Link)
-                        .with_attribute("href", &format!("#{}", location))
+                        .with_attribute("href", format!("#{}", location))
                         .with_raw(location)
                         .to_html_string(),
                     "|",
@@ -710,9 +709,8 @@ fn get_commits(
                             .unwrap()
                             .try_into_blob()
                             .map_or(Vec::new(), |mut b| b.take_data());
-                        let string =
-                            String::from_utf8(blob).unwrap_or_else(|_| "binary_file".to_owned());
-                        string
+
+                        String::from_utf8(blob).unwrap_or_else(|_| "binary_file".to_owned())
                     });
                 let new_string = tree
                     .lookup_entry_by_path(change.location().to_str().unwrap())
@@ -723,9 +721,8 @@ fn get_commits(
                             .unwrap()
                             .try_into_blob()
                             .map_or(Vec::new(), |mut b| b.take_data());
-                        let string =
-                            String::from_utf8(blob).unwrap_or_else(|_| "binary_file".to_owned());
-                        string
+
+                        String::from_utf8(blob).unwrap_or_else(|_| "binary_file".to_owned())
                     });
                 let input = InternedInput::new(old_string.as_str(), new_string.as_str());
                 let udiff = UnifiedDiff::new(
@@ -781,12 +778,12 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
         };
         let obj = repo.find_object(entry.oid)?;
 
-        let path = PathBuf::from(format!("{}.html", entry.filepath.to_string()));
+        let path = PathBuf::from(format!("{}.html", entry.filepath));
         let mut content = Container::new(build_html::ContainerType::Div)
             .with_attributes([("id", "content")])
             .with_paragraph(format!(
                 "{} ({}B)",
-                entry.filepath.to_string(),
+                entry.filepath,
                 obj.data.len()
             ))
             .with_html(HtmlElement::new(build_html::HtmlTag::HorizontalRule));
@@ -807,7 +804,7 @@ fn get_files(repo: &Repository) -> anyhow::Result<(Container, Vec<(PathBuf, Cont
                 })
                 .collect();
 
-            content.add_preformatted_attr(&lines.join("\n"), [("id", "blob")]);
+            content.add_preformatted_attr(lines.join("\n"), [("id", "blob")]);
 
             format!("{}L", file_content.lines().count())
         } else {
@@ -848,7 +845,7 @@ pub fn build_repo_pages(
     info!(?repo_path, ?out_dir, ?log_length, "build repo pages");
     let start = Instant::now();
     let out_dir = out_dir.canonicalize()?;
-    let repo = gix::open(&repo_path).context("open repo")?;
+    let repo = gix::open(repo_path).context("open repo")?;
 
     let meta = Meta::load(&repo, repo_path)?;
 

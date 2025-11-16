@@ -44,7 +44,7 @@ fn main() -> anyhow::Result<()> {
         PagesOptions {
             out_dir: args.out_dir.clone(),
             working_dir: args.working_dir,
-            index: args.index.then(|| stagix::IndexOptions {
+            index: args.index.then_some(stagix::IndexOptions {
                 out_dir: Some(args.out_dir),
                 stylesheet: args.stylesheet,
                 logo: args.logo,
