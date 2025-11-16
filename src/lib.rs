@@ -392,12 +392,10 @@ fn find_root_of_docs_dir<'a, 'repo>(
     for entry in tree.iter() {
         let entry = entry?;
         let filename = entry.filename();
-        let kind = entry.mode().kind();
         if filename == next_component && entry.mode().is_tree() {
             let tree = entry.object()?.peel_to_tree()?;
             return find_root_of_docs_dir(docs_dir, tree);
         }
-        println!("found pages_dir in root {filename:?}, {kind:?}")
     }
 
     Err(anyhow::anyhow!("root of docs dir not found"))
