@@ -29,6 +29,9 @@ struct Args {
     /// Path to png favicon that will be copied next to the `index.html`, requires --out-dir
     #[clap(long)]
     favicon: Option<PathBuf>,
+    /// URL to use as the base for repos links.
+    #[clap(long)]
+    repos_url: Option<String>,
     /// URL to use as the base for pages links.
     #[clap(long)]
     pages_url: Option<String>,
@@ -49,6 +52,7 @@ fn main() -> anyhow::Result<()> {
                 stylesheet: args.stylesheet,
                 logo: args.logo,
                 favicon: args.favicon,
+                repos_url: args.repos_url,
                 pages_url: args.pages_url,
             }),
         },

@@ -208,6 +208,7 @@ pub struct IndexOptions {
     pub stylesheet: Option<PathBuf>,
     pub logo: Option<PathBuf>,
     pub favicon: Option<PathBuf>,
+    pub repos_url: Option<String>,
     pub pages_url: Option<String>,
 }
 
@@ -223,6 +224,12 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: IndexOptions) -> anyhow::R
         license: None,
     };
 
+    let repos_url = options.repos_url.map_or_else(
+        || Default::default(),
+        |u| {
+            if u.ends_with('/') { u } else { format!("{u}/") }
+        },
+    );
     let pages_url = options.pages_url.as_deref();
 
     let mut table = Table::new()
@@ -235,7 +242,7 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: IndexOptions) -> anyhow::R
             if pages_url.is_some() { "Pages URL" } else { "" },
         ]);
     for repo_path in repos {
-        if let Err(error) = add_row_for_repo_index(&repo_path, pages_url, &mut table) {
+        if let Err(error) = add_row_for_repo_index(&repo_path, &repos_url, pages_url, &mut table) {
             warn!(?repo_path, %error, "Failed to add index row for repo");
         }
     }
@@ -413,6 +420,7 @@ fn find_root_of_docs_dir<'a, 'repo>(
 
 fn add_row_for_repo_index(
     repo_path: &Path,
+    repos_url: &str,
     pages_url: Option<&str>,
     table: &mut Table,
 ) -> anyhow::Result<()> {
@@ -421,7 +429,7 @@ fn add_row_for_repo_index(
     let time = head.time()?.format(ISO8601);
     let meta = Meta::load(&repo, repo_path)?;
     let name = HtmlElement::new(build_html::HtmlTag::Link)
-        .with_attribute("href", format!("{}/log.html", meta.name))
+        .with_attribute("href", format!("{}{}/log.html", repos_url, meta.name))
         .with_raw(&meta.name)
         .to_html_string();
     let pages_url = if meta.pages.is_some()
