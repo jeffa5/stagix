@@ -420,22 +420,18 @@ fn add_row_for_repo_index(
         .with_attribute("href", format!("{}/log.html", meta.name))
         .with_raw(&meta.name)
         .to_html_string();
-    let pages_url = meta
-        .pages
-        .and_then(|pages| {
-            pages_url.map(|pages_url| {
-                let pages_full_url = if pages_url.is_empty() {
-                    pages.clone()
-                } else {
-                    format!("{pages_url}/{pages}")
-                };
-                HtmlElement::new(build_html::HtmlTag::Link)
-                    .with_attribute("href", pages_full_url)
-                    .with_raw(&pages)
-                    .to_html_string()
-            })
-        })
-        .unwrap_or_default();
+    let pages_url = if meta.pages.is_some()
+        && let Some(pages_url) = pages_url
+    {
+        let repo_name = repo_path.file_stem().unwrap_or_default().to_string_lossy();
+        let pages_full_url = format!("{pages_url}/{repo_name}");
+        HtmlElement::new(build_html::HtmlTag::Link)
+            .with_attribute("href", pages_full_url)
+            .with_raw(&repo_name)
+            .to_html_string()
+    } else {
+        String::new()
+    };
 
     table.add_body_row([name, meta.description, meta.owner, time, pages_url]);
     Ok(())
