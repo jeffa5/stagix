@@ -14,7 +14,7 @@ use gix_date::time::format::ISO8601;
 use html::Bold;
 use nix::fcntl::{OFlag, RenameFlags, open, renameat2};
 use nix::sys::stat::Mode;
-use std::fs::{File, create_dir, create_dir_all, read_to_string, remove_dir_all, rename};
+use std::fs::{File, create_dir, create_dir_all, read_to_string, remove_dir_all};
 use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 use tracing::info;
