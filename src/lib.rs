@@ -228,7 +228,13 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: IndexOptions) -> anyhow::R
 
     let mut table = Table::new()
         .with_attributes([("id", "index")])
-        .with_header_row(["Name", "Description", "Owner", "Last commit", "Pages URL"]);
+        .with_header_row([
+            "Name",
+            "Description",
+            "Owner",
+            "Last commit",
+            if pages_url.is_some() { "Pages URL" } else { "" },
+        ]);
     for repo_path in repos {
         if let Err(error) = add_row_for_repo_index(&repo_path, pages_url, &mut table) {
             warn!(?repo_path, %error, "Failed to add index row for repo");
@@ -265,11 +271,11 @@ pub struct PagesOptions {
 pub fn build_pages_dirs(repos: Vec<PathBuf>, options: PagesOptions) -> anyhow::Result<()> {
     info!(num_repos = repos.len(), ?options, "building pages dir");
 
-    if !options.out_dir.exists(){
+    if !options.out_dir.exists() {
         create_dir_all(&options.out_dir)?;
     }
     let out_dir = options.out_dir.canonicalize()?;
-    if !options.working_dir.exists(){
+    if !options.working_dir.exists() {
         create_dir_all(&options.working_dir)?;
     }
     let working_dir = options.working_dir.canonicalize()?;
