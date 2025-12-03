@@ -29,7 +29,7 @@ const LICENSE_FILES: [&str; 3] = ["LICENSE", "LICENSE.md", "COPYING"];
 #[derive(Debug)]
 pub struct Meta {
     pub description: String,
-    pub url: String,
+    pub urls: Vec<String>,
     pub name: String,
     pub owner: String,
     pub pages: Option<String>,
@@ -39,15 +39,15 @@ pub struct Meta {
 }
 
 impl Meta {
-    pub fn load(repo: &Repository, path: &Path) -> anyhow::Result<Self> {
-        debug!(repo =? repo.path(), ?path, "loading metadata for repo");
+    pub fn load(
+        repo: &Repository,
+        path: &Path,
+        clone_base_urls: &[String],
+    ) -> anyhow::Result<Self> {
+        debug!(repo =? repo.path(), ?path, ?clone_base_urls, "loading metadata for repo");
         let description = Self::load_meta_file(repo, "description")?.unwrap_or_default();
         if description.is_empty() {
             debug!("no description file found");
-        }
-        let url = Self::load_meta_file(repo, "url")?.unwrap_or_default();
-        if url.is_empty() {
-            debug!("no url file found");
         }
         let owner = Self::load_meta_file(repo, "owner")?.unwrap_or_default();
         if owner.is_empty() {
@@ -65,6 +65,11 @@ impl Meta {
             .to_string_lossy()
             .into_owned();
 
+        let urls = clone_base_urls
+            .iter()
+            .map(|cbu| format!("{cbu}/{name}.git"))
+            .collect::<Vec<_>>();
+
         let head_tree = repo.head_tree()?;
         let mut readme = None;
         let mut license = None;
@@ -81,7 +86,7 @@ impl Meta {
             }
         }
 
-        let mut max_mod_time = ["description", "url", "owner", "pages"]
+        let mut max_mod_time = ["description", "owner", "pages"]
             .iter()
             .map(|n| {
                 Self::load_meta_mod_time(repo, n)
@@ -96,7 +101,7 @@ impl Meta {
 
         Ok(Meta {
             description,
-            url,
+            urls,
             name,
             owner,
             pages,
@@ -194,8 +199,8 @@ impl Meta {
                 )
                 .to_html_string(),
         ]);
-        if !self.url.is_empty() {
-            head_table.add_body_row(["", &format!("git clone {}", self.url)]);
+        for url in &self.urls {
+            head_table.add_body_row(["", &format!("git clone {}", url)]);
         }
         if nav {
             let mut nav = Container::new(build_html::ContainerType::Nav)
@@ -242,7 +247,7 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: IndexOptions) -> anyhow::R
     info!(num_repos = repos.len(), ?options, "building index page");
     let index_meta = Meta {
         description: String::new(),
-        url: String::new(),
+        urls: Vec::new(),
         name: "Repositories".to_owned(),
         owner: String::new(),
         pages: None,
@@ -329,7 +334,10 @@ pub fn build_pages_dirs(repos: Vec<PathBuf>, options: PagesOptions) -> anyhow::R
         }
         create_dir_all(&working_dir)?;
         let abs_repo_path = repo_path.canonicalize()?;
-        if let Err(error) = copy_docs_to_out_dir(&abs_repo_path, &out_dir, &working_dir) {
+        let clone_base_urls = &[];
+        if let Err(error) =
+            copy_docs_to_out_dir(&abs_repo_path, &out_dir, &working_dir, clone_base_urls)
+        {
             warn!(?repo_path, ?out_dir, %error, "Failed to copy docs to out_dir");
         }
     }
@@ -345,11 +353,12 @@ fn copy_docs_to_out_dir(
     repo_path: &Path,
     out_dir: &Path,
     working_dir: &Path,
+    clone_base_urls: &[String],
 ) -> anyhow::Result<()> {
     debug!(?repo_path, ?out_dir, "Copying docs to out dir");
     let repo = gix::open(repo_path)?;
     let head = repo.head_commit()?;
-    let meta = Meta::load(&repo, repo_path)?;
+    let meta = Meta::load(&repo, repo_path, clone_base_urls)?;
 
     let Some(repo_name) = repo_path.file_stem() else {
         anyhow::bail!("no repo name found")
@@ -463,7 +472,8 @@ fn add_row_for_repo_index(
     let repo = gix::open(repo_path)?;
     let head = repo.head_commit()?;
     let time = head.time()?.format(ISO8601)?;
-    let meta = Meta::load(&repo, repo_path)?;
+    let clone_base_urls = &[];
+    let meta = Meta::load(&repo, repo_path, clone_base_urls)?;
     let name = HtmlElement::new(build_html::HtmlTag::Link)
         .with_attribute("href", format!("{}{}/log.html", repos_url, meta.name))
         .with_raw(&meta.name)
@@ -874,13 +884,14 @@ pub fn build_repo_pages(
     repo_path: &Path,
     out_dir: &Path,
     log_length: Option<usize>,
+    clone_base_urls: &[String],
 ) -> anyhow::Result<()> {
     info!(?repo_path, ?out_dir, ?log_length, "build repo pages");
     let start = Instant::now();
     let out_dir = out_dir.canonicalize()?;
     let repo = gix::open(repo_path).context("open repo")?;
 
-    let meta = Meta::load(&repo, repo_path)?;
+    let meta = Meta::load(&repo, repo_path, clone_base_urls)?;
 
     if repo_is_newer(&repo, &out_dir.join("log.html"))
         || meta.mod_time > out_dir.join("log.html").metadata()?.modified()?
