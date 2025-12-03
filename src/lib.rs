@@ -4,13 +4,13 @@ use build_html::{
     escape_html,
 };
 use gix::bstr::ByteSlice as _;
+use gix::date::time::format::ISO8601;
 use gix::diff::blob::UnifiedDiff;
 use gix::diff::blob::intern::InternedInput;
-use gix::diff::blob::unified_diff::{ContextSize, NewlineSeparator};
+use gix::diff::blob::unified_diff::{ConsumeBinaryHunk, ContextSize};
 use gix::objs::tree::EntryKind;
 use gix::traverse::tree::Recorder;
 use gix::{Repository, Tree};
-use gix_date::time::format::ISO8601;
 use html::Bold;
 use nix::fcntl::{OFlag, RenameFlags, open, renameat2};
 use nix::sys::stat::Mode;
@@ -436,7 +436,7 @@ fn add_row_for_repo_index(
 ) -> anyhow::Result<()> {
     let repo = gix::open(repo_path)?;
     let head = repo.head_commit()?;
-    let time = head.time()?.format(ISO8601);
+    let time = head.time()?.format(ISO8601)?;
     let meta = Meta::load(&repo, repo_path)?;
     let name = HtmlElement::new(build_html::HtmlTag::Link)
         .with_attribute("href", format!("{}{}/log.html", repos_url, meta.name))
@@ -473,7 +473,7 @@ fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
         let author = commit.author()?;
         let tag_name = tag.name().shorten().to_str()?;
         let name = author.name.to_str()?;
-        let time = author.time()?.format(ISO8601);
+        let time = author.time()?.format(ISO8601)?;
         table.add_body_row([tag_name, &time, name]);
         has_tags = true;
     }
@@ -492,7 +492,7 @@ fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
         let author = commit.author()?;
         let branch_name = branch.name().shorten().to_str()?;
         let name = author.name.to_str()?;
-        let time = author.time()?.format(ISO8601);
+        let time = author.time()?.format(ISO8601)?;
         table.add_body_row([branch_name, &time, name]);
     }
     container.add_table(table);
@@ -526,7 +526,7 @@ fn get_log(repo: &Repository, log_length: Option<usize>) -> anyhow::Result<Conta
             .to_html_string();
         let author = commit.author()?;
         let name = author.name.to_string();
-        let time = author.time()?.format(ISO8601);
+        let time = author.time()?.format(ISO8601)?;
         let tree = commit.tree()?;
         let mut ancestors = commit.ancestors().first_parent_only().all()?;
         let ancestor_tree = if let Some(ancestor) = ancestors.nth(1) {
@@ -627,7 +627,7 @@ fn get_commits(
         pre.add_child(escape_html(&format!("{} <{}>\n", author.name, author.email)).into());
 
         pre.add_html(Bold::from("date "));
-        pre.add_child(author.time()?.format(ISO8601).into());
+        pre.add_child(author.time()?.format(ISO8601)?.into());
         pre.add_child("\n".into());
 
         let message = commit.message()?;
@@ -741,12 +741,8 @@ fn get_commits(
                         String::from_utf8(blob).unwrap_or_else(|_| "binary_file".to_owned())
                     });
                 let input = InternedInput::new(old_string.as_str(), new_string.as_str());
-                let udiff = UnifiedDiff::new(
-                    &input,
-                    String::new(),
-                    NewlineSeparator::AfterHeaderAndWhenNeeded("\n"),
-                    ContextSize::symmetrical(5),
-                );
+                let consumer = ConsumeBinaryHunk::new(String::new(), "\n");
+                let udiff = UnifiedDiff::new(&input, consumer, ContextSize::symmetrical(5));
                 let diff =
                     gix::diff::blob::diff(gix::diff::blob::Algorithm::Histogram, &input, udiff)?;
 
