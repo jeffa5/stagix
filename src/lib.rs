@@ -17,7 +17,7 @@ use nix::sys::stat::Mode;
 use std::fs::{File, create_dir, create_dir_all, read_to_string, remove_dir_all, remove_file};
 use std::os::unix::fs::symlink;
 use std::path::{Component, Path, PathBuf};
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::info;
 use tracing::{debug, warn};
 
@@ -35,6 +35,7 @@ pub struct Meta {
     pub pages: Option<String>,
     pub readme: Option<String>,
     pub license: Option<String>,
+    pub mod_time: SystemTime,
 }
 
 impl Meta {
@@ -80,6 +81,19 @@ impl Meta {
             }
         }
 
+        let mut max_mod_time = ["description", "url", "owner", "pages"]
+            .iter()
+            .map(|n| {
+                Self::load_meta_mod_time(repo, n)
+                    .unwrap_or_default()
+                    .unwrap_or(UNIX_EPOCH)
+            })
+            .max()
+            .unwrap_or(UNIX_EPOCH);
+        let head_commit_time = repo.head_commit()?.time()?;
+        max_mod_time =
+            max_mod_time.max(UNIX_EPOCH + Duration::from_secs(head_commit_time.seconds as u64));
+
         Ok(Meta {
             description,
             url,
@@ -88,6 +102,7 @@ impl Meta {
             pages,
             readme,
             license,
+            mod_time: max_mod_time,
         })
     }
 
@@ -99,6 +114,16 @@ impl Meta {
         }
         let content = read_to_string(path)?.trim().to_owned();
         Ok(Some(content))
+    }
+
+    fn load_meta_mod_time(repo: &Repository, name: &str) -> anyhow::Result<Option<SystemTime>> {
+        debug!(repo =? repo.path(), ?name, "loading metadata file mod time for repo");
+        let path = repo.path().join(name);
+        if !path.is_file() {
+            return Ok(None);
+        }
+        let mod_time = path.metadata()?.modified()?;
+        Ok(Some(mod_time))
     }
 
     pub fn write_html_content_to_file(
@@ -223,6 +248,7 @@ pub fn build_index_page(repos: Vec<PathBuf>, options: IndexOptions) -> anyhow::R
         pages: None,
         readme: None,
         license: None,
+        mod_time: UNIX_EPOCH,
     };
 
     let repos_url = options.repos_url.map_or_else(Default::default, |u| {
@@ -856,52 +882,74 @@ pub fn build_repo_pages(
 
     let meta = Meta::load(&repo, repo_path)?;
 
-    let refs = get_refs(&repo).context("get refs")?;
-    meta.write_html_content_to_file("Refs", &PathBuf::from("refs.html"), refs, true, &out_dir)?;
+    if repo_is_newer(&repo, &out_dir.join("log.html"))
+        || meta.mod_time > out_dir.join("log.html").metadata()?.modified()?
+    {
+        let refs = get_refs(&repo).context("get refs")?;
+        meta.write_html_content_to_file("Refs", &PathBuf::from("refs.html"), refs, true, &out_dir)?;
 
-    let (file_list, files) = get_files(&repo).context("get files")?;
-    create_dir_all(out_dir.join("files"))?;
-    for (path, content) in files {
-        create_dir_all(out_dir.join("files").join(path.parent().unwrap()))?;
+        let (file_list, files) = get_files(&repo).context("get files")?;
+        create_dir_all(out_dir.join("files"))?;
+        for (path, content) in files {
+            create_dir_all(out_dir.join("files").join(path.parent().unwrap()))?;
+            meta.write_html_content_to_file(
+                path.with_extension("")
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+                &PathBuf::from("files").join(&path),
+                content,
+                true,
+                &out_dir,
+            )?;
+        }
         meta.write_html_content_to_file(
-            path.with_extension("")
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            &PathBuf::from("files").join(&path),
-            content,
+            "Files",
+            &PathBuf::from("files.html"),
+            file_list,
             true,
             &out_dir,
         )?;
-    }
-    meta.write_html_content_to_file(
-        "Files",
-        &PathBuf::from("files.html"),
-        file_list,
-        true,
-        &out_dir,
-    )?;
 
-    let log = get_log(&repo, log_length).context("get log")?;
-    meta.write_html_content_to_file("Log", &PathBuf::from("log.html"), log, true, &out_dir)?;
+        let log = get_log(&repo, log_length).context("get log")?;
+        meta.write_html_content_to_file("Log", &PathBuf::from("log.html"), log, true, &out_dir)?;
 
-    let commits = get_commits(&repo, log_length).context("get commits")?;
-    create_dir_all(out_dir.join("commits"))?;
-    for (id, title, commit) in commits {
-        meta.write_html_content_to_file(
-            &title,
-            &PathBuf::from("commits").join(&id).with_extension("html"),
-            commit,
-            true,
-            &out_dir,
-        )?;
+        let commits = get_commits(&repo, log_length).context("get commits")?;
+        create_dir_all(out_dir.join("commits"))?;
+        for (id, title, commit) in commits {
+            meta.write_html_content_to_file(
+                &title,
+                &PathBuf::from("commits").join(&id).with_extension("html"),
+                commit,
+                true,
+                &out_dir,
+            )?;
+        }
+        info!(?out_dir, elapsed=? start.elapsed(), "Built repo");
+    } else {
+        info!(?out_dir, elapsed=? start.elapsed(), "Skipped building repo as log.html is newer than head commit");
     }
-    info!(?out_dir, elapsed=? start.elapsed(), "Built repo");
     Ok(())
 }
 
 fn to_root_path(from: &Path, to: &Path) -> String {
     let path = from.strip_prefix(to).unwrap();
     "../".repeat(path.components().count().saturating_sub(1))
+}
+
+fn repo_is_newer(repo: &Repository, target: &Path) -> bool {
+    let Ok(target_modified) = target.metadata().and_then(|meta| meta.modified()) else {
+        return true;
+    };
+    let Ok(target_mod_duration) = target_modified.duration_since(UNIX_EPOCH) else {
+        return true;
+    };
+    let Ok(head_commit) = repo.head_commit() else {
+        return true;
+    };
+    let Ok(time) = head_commit.time() else {
+        return true;
+    };
+    Duration::from_secs(time.seconds as u64) > target_mod_duration
 }
