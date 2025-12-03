@@ -658,7 +658,7 @@ fn get_commits(
         ancestor_tree.changes()?.for_each_to_obtain_tree(
             &tree,
             |change| -> anyhow::Result<gix::object::tree::diff::Action> {
-                if change.entry_mode().is_tree() {
+                if !change.entry_mode().is_blob_or_symlink() {
                     return Ok(gix::object::tree::diff::Action::Continue);
                 }
 
