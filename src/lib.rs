@@ -468,7 +468,7 @@ fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
         .with_header_row(["Name", "Last commit time", "Author"]);
     let mut has_tags = false;
     for tag in refs.tags()? {
-        let mut tag = tag.unwrap();
+        let mut tag = tag.map_err(|e| anyhow::anyhow!(e))?;
         let commit = tag.peel_to_commit()?;
         let author = commit.author()?;
         let tag_name = tag.name().shorten().to_str()?;
@@ -487,7 +487,7 @@ fn get_refs(repo: &Repository) -> anyhow::Result<Container> {
         .with_attributes([("id", "branches")])
         .with_header_row(["Name", "Last commit time", "Author"]);
     for branch in refs.local_branches()? {
-        let mut branch = branch.unwrap();
+        let mut branch = branch.map_err(|e| anyhow::anyhow!(e))?;
         let commit = branch.peel_to_commit()?;
         let author = commit.author()?;
         let branch_name = branch.name().shorten().to_str()?;
@@ -657,7 +657,7 @@ fn get_commits(
         let mut pre_diffs = Vec::new();
         ancestor_tree.changes()?.for_each_to_obtain_tree(
             &tree,
-            |change| -> Result<gix::object::tree::diff::Action, std::convert::Infallible> {
+            |change| -> anyhow::Result<gix::object::tree::diff::Action> {
                 if change.entry_mode().is_tree() {
                     return Ok(gix::object::tree::diff::Action::Continue);
                 }
@@ -673,8 +673,8 @@ fn get_commits(
                 let mut lines_added = 0;
                 let mut lines_removed = 0;
 
-                let mut diff = change.diff(&mut resource_cache).unwrap();
-                if let Some(counts) = diff.line_counts().unwrap() {
+                let mut diff = change.diff(&mut resource_cache)?;
+                if let Some(counts) = diff.line_counts()? {
                     total_files_changed += 1;
                     lines_added += counts.insertions as usize;
                     lines_removed += counts.removals as usize;
@@ -682,7 +682,7 @@ fn get_commits(
                     total_lines_removed += lines_removed;
                 }
 
-                let location = change.location().to_str().unwrap();
+                let location = change.location().to_str()?;
                 diffstat_table.add_body_row([
                     marker,
                     &HtmlElement::new(build_html::HtmlTag::Link)
@@ -719,8 +719,7 @@ fn get_commits(
                     .to_html_string();
 
                 let old_string = ancestor_tree
-                    .lookup_entry_by_path(change.location().to_str().unwrap())
-                    .unwrap()
+                    .lookup_entry_by_path(change.location().to_str()?)?
                     .map_or(String::new(), |entry| {
                         let blob = entry
                             .object()
@@ -731,8 +730,7 @@ fn get_commits(
                         String::from_utf8(blob).unwrap_or_else(|_| "binary_file".to_owned())
                     });
                 let new_string = tree
-                    .lookup_entry_by_path(change.location().to_str().unwrap())
-                    .unwrap()
+                    .lookup_entry_by_path(change.location().to_str()?)?
                     .map_or(String::new(), |entry| {
                         let blob = entry
                             .object()
@@ -750,8 +748,7 @@ fn get_commits(
                     ContextSize::symmetrical(5),
                 );
                 let diff =
-                    gix::diff::blob::diff(gix::diff::blob::Algorithm::Histogram, &input, udiff)
-                        .unwrap();
+                    gix::diff::blob::diff(gix::diff::blob::Algorithm::Histogram, &input, udiff)?;
 
                 pre_diffs.push(location_marker_html + &escape_html(&diff));
 

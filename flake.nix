@@ -39,6 +39,7 @@
 
     devShells.${system}.default = pkgs.mkShell {
       packages = [
+        pkgs.rust-analyzer
         pkgs.rustc
         pkgs.cargo
         pkgs.rustfmt
